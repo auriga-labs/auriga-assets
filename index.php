@@ -328,6 +328,7 @@ body.player-open .panel{padding-bottom:calc(var(--player-h) + 32px)}
     <a class="nav-item" data-tab="se"    href="#se"><i class="ti ti-wave-sine" aria-hidden="true"></i> SE (効果音)</a>
     <a class="nav-item" data-tab="image" href="#image"><i class="ti ti-photo" aria-hidden="true"></i> 画像</a>
     <a class="nav-item" data-tab="video" href="#video"><i class="ti ti-video" aria-hidden="true"></i> 動画</a>
+    <a class="nav-item" href="admin.php"><i class="ti ti-database-plus" aria-hidden="true"></i> 素材の登録</a>
 
     <div class="sidebar-foot">
       素材の利用条件は各配布元の<br>ライセンスに従ってください。<br>© 2026 Auriga Labs
@@ -380,6 +381,9 @@ body.player-open .panel{padding-bottom:calc(var(--player-h) + 32px)}
   <a class="bottom-nav-item" data-tab="video" href="#video">
     <i class="ti ti-video" aria-hidden="true"></i><span>動画</span>
   </a>
+  <a class="bottom-nav-item" href="admin.php">
+    <i class="ti ti-database-plus" aria-hidden="true"></i><span>登録</span>
+  </a>
 </nav>
 
 <script>
@@ -389,8 +393,12 @@ body.player-open .panel{padding-bottom:calc(var(--player-h) + 32px)}
    keyName: 'api' のとき config.php のどのキーを使うか (未設定案内に使う) */
 const google = site => q => `https://www.google.com/search?q=site:${site}+${encodeURIComponent(q)}`;
 
+/* 各タブ共通のローカル DB プロバイダー (api.php の provider=local + kind=タブ名) */
+const localProvider = { id: 'local', label: 'ローカルDB', icon: 'database', mode: 'api', local: true };
+
 const PROVIDERS = {
   bgm: [
+    { ...localProvider },
     { id: 'jamendo',  label: 'Jamendo',          icon: 'brand-vimeo',  mode: 'api',  keyName: 'jamendo',
       keyUrl: 'https://devportal.jamendo.com/', site: 'jamendo.com' },
     { id: 'dova',     label: 'DOVA-SYNDROME',    icon: 'external-link', mode: 'link', url: google('dova-s.jp') },
@@ -399,6 +407,7 @@ const PROVIDERS = {
     { id: 'musmus',   label: 'MusMus',           icon: 'external-link', mode: 'link', url: google('musmus.main.jp') },
   ],
   se: [
+    { ...localProvider },
     { id: 'freesound', label: 'Freesound',       icon: 'wave-square',  mode: 'api',  keyName: 'freesound',
       keyUrl: 'https://freesound.org/apiv2/apply/', site: 'freesound.org' },
     { id: 'selab',     label: '効果音ラボ',        icon: 'external-link', mode: 'link', url: google('soundeffect-lab.info') },
@@ -406,6 +415,7 @@ const PROVIDERS = {
     { id: 'maou-se',   label: '魔王魂',           icon: 'external-link', mode: 'link', url: q => `https://maou.audio/?s=${encodeURIComponent(q)}` },
   ],
   image: [
+    { ...localProvider },
     { id: 'pixabay-image', label: 'Pixabay',     icon: 'photo-search', mode: 'api',  keyName: 'pixabay',
       keyUrl: 'https://pixabay.com/api/docs/', site: 'pixabay.com' },
     { id: 'pexels-image',  label: 'Pexels',      icon: 'photo-search', mode: 'api',  keyName: 'pexels',
@@ -416,6 +426,7 @@ const PROVIDERS = {
     { id: 'photoac',       label: '写真AC',       icon: 'external-link', mode: 'link', url: q => `https://www.photo-ac.com/main/search?q=${encodeURIComponent(q)}` },
   ],
   video: [
+    { ...localProvider },
     { id: 'pixabay-video', label: 'Pixabay',     icon: 'video',        mode: 'api',  keyName: 'pixabay',
       keyUrl: 'https://pixabay.com/api/docs/', site: 'pixabay.com' },
     { id: 'pexels-video',  label: 'Pexels',      icon: 'video',        mode: 'api',  keyName: 'pexels',
@@ -485,7 +496,8 @@ function buildPanel(tab) {
     runSearch(tab, false);
   }));
 
-  renderIdle(tab);
+  /* 初期表示: ローカル DB が選択されているので新着一覧を読み込む */
+  runSearch(tab, false);
 }
 
 function provider(tab) {
@@ -498,7 +510,8 @@ async function runSearch(tab, submitted) {
   const q = state[tab].query;
   const box = document.getElementById('results-' + tab);
 
-  if (q === '') { renderIdle(tab); return; }
+  /* ローカル DB はキーワード空でも新着一覧を表示する */
+  if (q === '' && !p.local) { renderIdle(tab); return; }
 
   /* リンク型: 検索ボタンで新しいタブに開く。ピル切り替え時は案内だけ出す */
   if (p.mode === 'link') {
@@ -516,7 +529,8 @@ async function runSearch(tab, submitted) {
   box.replaceChildren(placeholderMessage('loader-2 spin', '検索中…'));
   let data;
   try {
-    const res = await fetch(`api.php?provider=${encodeURIComponent(p.id)}&q=${encodeURIComponent(q)}`);
+    const kind = p.local ? `&kind=${tab}` : '';
+    const res = await fetch(`api.php?provider=${encodeURIComponent(p.id)}&q=${encodeURIComponent(q)}${kind}`);
     data = await res.json();
   } catch (e) {
     console.error('検索に失敗:', e);
@@ -545,7 +559,16 @@ async function runSearch(tab, submitted) {
     return;
   }
   if (!data.items || data.items.length === 0) {
-    box.replaceChildren(placeholderMessage('zoom-question', `「${q}」に一致する素材が見つかりませんでした`));
+    if (p.local && q === '') {
+      box.replaceChildren(noticeCard({
+        icon: 'database',
+        title: 'ローカルDB にまだ素材がありません',
+        html: '登録画面から素材を追加すると、ここに一覧表示されます。',
+        actions: [{ label: '素材を登録する', icon: 'database-plus', href: 'admin.php', self: true }],
+      }));
+    } else {
+      box.replaceChildren(placeholderMessage('zoom-question', `「${q}」に一致する素材が見つかりませんでした`));
+    }
     return;
   }
 
@@ -583,8 +606,7 @@ function noticeCard({ icon, title, html, actions = [] }) {
     const btn = document.createElement('a');
     btn.className = 'm-button' + (a.tonal ? ' is-tonal' : '');
     btn.href = a.href;
-    btn.target = '_blank';
-    btn.rel = 'noopener';
+    if (!a.self) { btn.target = '_blank'; btn.rel = 'noopener'; }
     btn.innerHTML = `<i class="ti ti-${a.icon}" aria-hidden="true"></i> `;
     btn.append(a.label);
     wrap.append(btn);
@@ -637,7 +659,8 @@ function renderVideoGrid(box, items, p) {
     card.querySelector('.duration').textContent = formatDuration(it.duration);
     card.querySelector('h3').textContent = it.title || p.label;
     card.querySelector('p').textContent = it.author ? `by ${it.author} · ${p.label}` : p.label;
-    card.querySelector('.asset-open').href = it.pageUrl;
+    const open = card.querySelector('.asset-open');
+    if (it.pageUrl) open.href = it.pageUrl; else open.remove();
 
     /* サムネイルクリックでインライン再生に差し替える */
     const thumb = card.querySelector('.asset-thumb');
@@ -675,7 +698,8 @@ function renderAudioList(box, items, p) {
     row.querySelector('.audio-title').textContent = it.title;
     row.querySelector('.audio-author').textContent = it.author ? `${it.author} · ${p.label}` : p.label;
     row.querySelector('.audio-duration').textContent = formatDuration(it.duration);
-    row.querySelector('.asset-open').href = it.pageUrl;
+    const open = row.querySelector('.asset-open');
+    if (it.pageUrl) open.href = it.pageUrl; else open.remove();
     row.querySelector('.audio-play').addEventListener('click', () => playAudio(it, row));
     list.append(row);
   }

@@ -15,10 +15,13 @@
 header('Content-Type: application/json; charset=utf-8');
 
 $KEYS     = require __DIR__ . '/config.php';
+require __DIR__ . '/db.php';
+
 $provider = $_GET['provider'] ?? '';
 $q        = trim($_GET['q'] ?? '');
 
-if ($q === '') {
+/* local (SQLite) はキーワード空でも全件一覧を返すので除外する */
+if ($q === '' && $provider !== 'local') {
     echo json_encode(['items' => []]);
     exit;
 }
@@ -73,6 +76,38 @@ function fetch_json(string $url, array $headers = []): array
 $eq = rawurlencode($q);
 
 switch ($provider) {
+
+case 'local': {
+    /* ローカル素材 DB (SQLite)。kind=bgm|se|image|video で絞り込み、
+       キーワードはタイトル・タグ・作者を部分一致で検索する。空なら新着 50 件 */
+    $kind = $_GET['kind'] ?? '';
+    if (!in_array($kind, ASSET_KINDS, true)) fail('bad_kind', 400);
+    $db = assets_db();
+    if ($q === '') {
+        $stmt = $db->prepare('SELECT * FROM assets WHERE kind = :k ORDER BY id DESC LIMIT 50');
+        $stmt->execute([':k' => $kind]);
+    } else {
+        $stmt = $db->prepare('SELECT * FROM assets WHERE kind = :k
+                              AND (title LIKE :q OR tags LIKE :q OR author LIKE :q)
+                              ORDER BY id DESC LIMIT 50');
+        $stmt->execute([':k' => $kind, ':q' => '%' . $q . '%']);
+    }
+    $type  = $kind === 'image' ? 'image' : ($kind === 'video' ? 'video' : 'audio');
+    $items = [];
+    foreach ($stmt as $row) {
+        $items[] = [
+            'type'     => $type,
+            'title'    => $row['title'],
+            'author'   => $row['author'],
+            'thumb'    => $row['thumb'] !== '' ? $row['thumb'] : ($type === 'image' ? $row['preview'] : ''),
+            'full'     => $row['preview'] !== '' ? $row['preview'] : $row['thumb'],
+            'preview'  => $row['preview'],
+            'duration' => $row['duration'],
+            'pageUrl'  => $row['page_url'] !== '' ? $row['page_url'] : $row['preview'],
+        ];
+    }
+    break;
+}
 
 case 'pixabay-image': {
     $key  = need_key($KEYS, 'pixabay');
