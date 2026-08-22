@@ -109,7 +109,8 @@ a{color:inherit}
 .topbar-title{font-size:16px;font-weight:600}
 
 /* ===== パネル ===== */
-.panel{display:none;flex:1;min-height:0;overflow-y:auto;padding:28px 24px 48px}
+/* 下端は常時表示の再生バーのぶんだけ余白を取る */
+.panel{display:none;flex:1;min-height:0;overflow-y:auto;padding:28px 24px calc(var(--player-h) + 32px)}
 .panel.active{display:block}
 .panel-inner{max-width:1100px;margin:0 auto}
 
@@ -292,16 +293,15 @@ a{color:inherit}
 .placeholder .spin{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-/* ===== 再生バー (オーディオ) ===== */
+/* ===== 再生バー (オーディオ、常時表示) ===== */
 .player{
   position:fixed;left:0;right:0;bottom:0;z-index:80;
   height:var(--player-h);
-  display:none;align-items:center;gap:14px;
+  display:flex;align-items:center;gap:14px;
   padding:0 18px;
   background:var(--bg1);border-top:1px solid var(--border);
   box-shadow:0 -4px 24px rgba(0,0,0,.06);
 }
-.player.show{display:flex}
 .player .audio-play{width:38px;height:38px;font-size:18px;background:var(--primary);color:#fff}
 .player-info{min-width:0;width:220px;flex-shrink:1}
 .player-seek{flex:1;accent-color:var(--primary);height:4px;cursor:pointer}
@@ -312,7 +312,6 @@ a{color:inherit}
   color:var(--txt3);font-size:18px;cursor:pointer;
 }
 .player-close:hover{background:var(--bg2);color:var(--txt1)}
-body.player-open .panel{padding-bottom:calc(var(--player-h) + 32px)}
 
 /* ===== 下部固定バー (モバイル) ===== */
 .bottom-nav{
@@ -341,8 +340,7 @@ body.player-open .panel{padding-bottom:calc(var(--player-h) + 32px)}
   .topbar-title{display:none}
   .topbar{padding:0 14px}
 
-  .panel{padding:20px 14px calc(var(--bottom-nav-h) + env(safe-area-inset-bottom) + 24px)}
-  body.player-open .panel{padding-bottom:calc(var(--bottom-nav-h) + var(--player-h) + env(safe-area-inset-bottom) + 24px)}
+  .panel{padding:20px 14px calc(var(--bottom-nav-h) + var(--player-h) + env(safe-area-inset-bottom) + 24px)}
   .player{bottom:calc(var(--bottom-nav-h) + env(safe-area-inset-bottom))}
   .player-info{width:auto}
   .player-time{display:none}
@@ -416,16 +414,16 @@ body.player-open .panel{padding-bottom:calc(var(--player-h) + 32px)}
   </div>
 </div>
 
-<!-- オーディオ再生バー -->
+<!-- オーディオ再生バー (常時表示) -->
 <div class="player" id="player">
-  <button class="audio-play" id="player-toggle" type="button" aria-label="再生 / 一時停止"><i class="ti ti-player-pause" aria-hidden="true"></i></button>
+  <button class="audio-play" id="player-toggle" type="button" aria-label="再生 / 一時停止"><i class="ti ti-player-play" aria-hidden="true"></i></button>
   <div class="player-info audio-info">
-    <div class="audio-title" id="player-title"></div>
-    <div class="audio-author" id="player-author"></div>
+    <div class="audio-title" id="player-title">再生していません</div>
+    <div class="audio-author" id="player-author">一覧の再生アイコンから試聴できます</div>
   </div>
   <input class="player-seek" id="player-seek" type="range" min="0" max="1000" value="0" aria-label="シークバー">
   <span class="player-time" id="player-time">0:00 / 0:00</span>
-  <button class="player-close" id="player-close" type="button" aria-label="閉じる"><i class="ti ti-x" aria-hidden="true"></i></button>
+  <button class="player-close" id="player-close" type="button" aria-label="停止" title="停止"><i class="ti ti-player-stop" aria-hidden="true"></i></button>
 </div>
 
 <!-- 下部固定バー (モバイル) -->
@@ -807,7 +805,11 @@ function renderAudioList(items, p) {
     row.querySelector('.audio-duration').textContent = formatDuration(it.duration);
     const open = row.querySelector('.asset-open');
     if (it.pageUrl) open.href = it.pageUrl; else open.remove();
-    row.querySelector('.audio-play').addEventListener('click', () => playAudio(it, row));
+    /* マウス環境ではアイコンにホバーするだけで再生/一時停止を切り替える。
+       タッチ環境 (ホバー不可) はこれまで通りタップで切り替える */
+    const playBtn = row.querySelector('.audio-play');
+    if (HOVER_PLAY) playBtn.addEventListener('mouseenter', () => playAudio(it, row));
+    else            playBtn.addEventListener('click',      () => playAudio(it, row));
     /* 再生ボタン・リンク以外のカード全体クリックで情報モーダルを開く */
     row.addEventListener('click', e => {
       if (e.target.closest('button, a')) return;
@@ -870,6 +872,9 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && !infoModal
 const audio = new Audio();
 let playingRow = null;
 
+/* ホバーできる環境か (再生アイコンのホバー切替に使う) */
+const HOVER_PLAY = matchMedia('(hover: hover)').matches;
+
 const player = {
   bar:    document.getElementById('player'),
   toggle: document.getElementById('player-toggle'),
@@ -889,8 +894,6 @@ function playAudio(it, row) {
 
   player.title.textContent = it.title;
   player.author.textContent = it.author;
-  player.bar.classList.add('show');
-  document.body.classList.add('player-open');
 }
 
 function setRowPlaying(row) {
@@ -906,6 +909,7 @@ function setRowPlaying(row) {
 }
 
 function togglePause() {
+  if (!audio.src) return;   /* 何も選んでいない状態では何もしない */
   if (audio.paused) audio.play(); else audio.pause();
 }
 
@@ -939,12 +943,16 @@ player.seek.addEventListener('change', () => {
 });
 
 player.toggle.addEventListener('click', togglePause);
+
+/* 停止: トラックを外して初期表示に戻す (バー自体は常時表示のまま) */
 player.close.addEventListener('click', () => {
   audio.pause();
   audio.removeAttribute('src');
   setRowPlaying(null);
-  player.bar.classList.remove('show');
-  document.body.classList.remove('player-open');
+  player.title.textContent = '再生していません';
+  player.author.textContent = '一覧の再生アイコンから試聴できます';
+  player.seek.value = 0;
+  player.time.textContent = '0:00 / 0:00';
 });
 
 /* ===== 表示フォーマット ===== */
