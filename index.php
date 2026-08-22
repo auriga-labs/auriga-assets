@@ -764,7 +764,7 @@ function renderVideoGrid(items, p) {
     thumb.addEventListener('click', () => {
       if (!it.preview) { window.open(it.pageUrl, '_blank', 'noopener'); return; }
       const video = document.createElement('video');
-      video.src = it.preview;
+      video.src = mediaUrl(it);
       video.controls = true;
       video.autoplay = true;
       video.playsInline = true;
@@ -868,6 +868,16 @@ document.getElementById('info-modal-close').addEventListener('click', closeInfoM
 infoModal.addEventListener('click', e => { if (e.target === infoModal) closeInfoModal(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !infoModal.hidden) closeInfoModal(); });
 
+/* ===== 再生 URL の解決 =====
+   ローカル DB に URL で登録したリモート素材は、配布元のホットリンク保護や
+   CORS 制限で直接再生できないことがあるため proxy.php 経由で再生する。
+   (proxy.php は DB 登録済み URL のみ中継する) */
+function mediaUrl(it) {
+  return it.local && /^https?:\/\//i.test(it.preview)
+    ? 'proxy.php?url=' + encodeURIComponent(it.preview)
+    : it.preview;
+}
+
 /* ===== オーディオ再生 (画面下の再生バーで共有 1 トラック再生) ===== */
 const audio = new Audio();
 let playingRow = null;
@@ -889,7 +899,7 @@ function playAudio(it, row) {
   if (playingRow === row) { togglePause(); return; }
 
   setRowPlaying(row);
-  audio.src = it.preview;
+  audio.src = mediaUrl(it);
   audio.play().catch(e => console.error('再生に失敗:', e));
 
   player.title.textContent = it.title;
