@@ -5,6 +5,13 @@
    各タブ内にプロバイダー選択ピルを持ち、
    - API 対応プロバイダー → api.php 経由でインライン検索結果を表示
    - API 非対応プロバイダー → 各サイトの検索ページを新しいタブで開く */
+require __DIR__ . '/db.php';
+
+/* プロバイダーピルに表示するローカル DB の登録件数 (kind → provider → count) */
+$counts = [];
+foreach (assets_db()->query('SELECT kind, provider, COUNT(*) AS c FROM assets GROUP BY kind, provider') as $r) {
+    $counts[$r['kind']][$r['provider']] = (int)$r['c'];
+}
 ?>
 <!DOCTYPE html>
 <html lang="ja">
@@ -162,7 +169,13 @@ a{color:inherit}
 .provider-tab:hover{background:var(--bg2)}
 .provider-tab.active{background:var(--primary-dim);color:var(--primary);border-color:transparent;font-weight:600}
 .provider-tab i{font-size:16px}
-.provider-tab .ext{font-size:13px;opacity:.6}
+/* 登録件数バッジ (「すべて」はタブ内の合算値) */
+.provider-tab .cnt{
+  font-size:11px;font-weight:600;line-height:1;
+  background:var(--bg3);color:var(--txt3);
+  border-radius:999px;padding:3px 8px;
+}
+.provider-tab.active .cnt{background:var(--primary);color:#fff}
 
 /* ===== 結果: 画像 / 動画グリッド ===== */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
@@ -460,6 +473,17 @@ a{color:inherit}
    一覧の先頭に描画する */
 const PROVIDERS = <?= json_encode(require __DIR__ . '/providers.php', JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 
+/* ローカル DB の登録件数 (kind → provider → count)。ピルのバッジに使う */
+const LOCAL_COUNTS = <?= json_encode($counts, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+
+/* ピルに表示する登録件数 (「すべて」はそのタブの合算値) */
+function providerCount(tab, id) {
+  const byProvider = LOCAL_COUNTS[tab] ?? {};
+  return id === ALL_PROVIDER.id
+    ? Object.values(byProvider).reduce((a, b) => a + b, 0)
+    : byProvider[id] ?? 0;
+}
+
 const google = site => q => `https://www.google.com/search?q=site:${site}+${encodeURIComponent(q)}`;
 const providerSearchUrl = (p, q) => p.searchUrl.replaceAll('{q}', encodeURIComponent(q));
 
@@ -511,7 +535,7 @@ function buildPanel(tab) {
         ${[ALL_PROVIDER, ...PROVIDERS[tab]].map((p, i) => `
           <button class="provider-tab${i === 0 ? ' active' : ''}" type="button" role="tab"
                   aria-selected="${i === 0}" data-provider="${p.id}">
-            ${p.label}${p.mode === 'link' ? ' <i class="ti ti-external-link ext" aria-hidden="true"></i>' : ''}
+            ${p.label} <span class="cnt">${providerCount(tab, p.id)}</span>
           </button>`).join('')}
       </div>
       <div class="results" id="results-${tab}"></div>
