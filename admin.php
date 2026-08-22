@@ -81,14 +81,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException('素材ファイルをアップロードするか、素材 URL を入力してください');
             }
 
-            $stmt = $db->prepare('INSERT INTO assets (kind, provider, title, author, tags, thumb, preview, page_url, duration, created_at)
-                                  VALUES (:kind, :provider, :title, :author, :tags, :thumb, :preview, :page_url, :duration, :now)');
+            $stmt = $db->prepare('INSERT INTO assets (kind, provider, title, author, tags, description, thumb, preview, page_url, duration, created_at)
+                                  VALUES (:kind, :provider, :title, :author, :tags, :description, :thumb, :preview, :page_url, :duration, :now)');
             $stmt->execute([
-                ':kind'     => $kind,
-                ':provider' => $providerId,
-                ':title'    => $title,
-                ':author'   => trim($_POST['author'] ?? ''),
-                ':tags'     => trim($_POST['tags'] ?? ''),
+                ':kind'        => $kind,
+                ':provider'    => $providerId,
+                ':title'       => $title,
+                ':author'      => trim($_POST['author'] ?? ''),
+                ':tags'        => trim($_POST['tags'] ?? ''),
+                ':description' => trim($_POST['description'] ?? ''),
                 ':thumb'    => $thumb,
                 ':preview'  => $preview,
                 ':page_url' => trim($_POST['page_url'] ?? ''),
@@ -194,6 +195,14 @@ a{color:inherit}
 .field.span2{grid-column:span 2}
 .field label{font-size:12px;font-weight:600;color:var(--txt2)}
 .field label small{font-weight:400;color:var(--txt3)}
+.field textarea{
+  padding:10px 14px;resize:vertical;min-height:64px;
+  border:1px solid var(--border);border-radius:12px;
+  background:var(--bg1);color:var(--txt1);
+  font-family:inherit;font-size:14px;outline:none;
+  transition:border-color .15s,box-shadow .15s;
+}
+.field textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-dim)}
 .field input[type=text],.field input[type=url],.field input[type=number],.field select{
   height:42px;padding:0 14px;
   border:1px solid var(--border);border-radius:12px;
@@ -349,6 +358,12 @@ a{color:inherit}
       <div class="field span2">
         <label for="f-tags">タグ <small>(空白区切り、検索キーワードになります)</small></label>
         <input type="text" id="f-tags" name="tags" placeholder="例: ピアノ 切ない ループ" value="<?= h($_POST['tags'] ?? '') ?>">
+      </div>
+
+      <div class="field span2">
+        <label for="f-description">説明 <small>(任意。カードクリックの情報モーダルに表示されます)</small></label>
+        <textarea id="f-description" name="description" rows="2"
+                  placeholder="例: 2019.09 | 幻想的 | ピアノ | 2分37秒/2.40 MB&#10;使用楽器：ピアノ"><?= h($_POST['description'] ?? '') ?></textarea>
       </div>
 
       <div class="field">

@@ -199,8 +199,11 @@ a{color:inherit}
 .audio-row{
   display:flex;align-items:center;gap:14px;
   background:var(--bg1);border:1px solid var(--border);border-radius:var(--radius);
-  padding:10px 14px;
+  padding:12px 14px;
+  cursor:pointer;transition:background .15s,border-color .15s;
 }
+.audio-row:hover{background:var(--bg2)}
+.audio-row.playing{border-color:var(--primary)}
 .audio-play{
   width:42px;height:42px;border-radius:50%;border:none;flex-shrink:0;
   background:var(--primary-dim);color:var(--primary);
@@ -216,6 +219,8 @@ a{color:inherit}
 .audio-info{min-width:0;flex:1}
 .audio-title{font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .audio-author{font-size:12px;color:var(--txt3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 一覧の詳細行 (例: 2019.09 | 幻想的 | ピアノ | 2分37秒/2.40 MB) */
+.audio-desc{font-size:12px;color:var(--txt2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .audio-duration{font-size:12px;color:var(--txt3);flex-shrink:0}
 
 /* リンク型プロバイダーのサイト内検索ボタン行 (結果一覧の上) */
@@ -248,6 +253,38 @@ a{color:inherit}
 .m-button:hover{filter:brightness(1.1)}
 .m-button i{font-size:17px}
 .m-button.is-tonal{background:var(--primary-dim);color:var(--primary)}
+
+/* ===== 情報モーダル (素材カードのクリックで表示) ===== */
+.modal-overlay{
+  position:fixed;inset:0;z-index:200;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.45);padding:20px;
+}
+.modal-overlay[hidden]{display:none}
+.modal{
+  background:var(--bg1);border:1px solid var(--border);border-radius:24px;
+  box-shadow:var(--shadow);
+  width:100%;max-width:520px;max-height:85vh;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.modal-hdr{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--border)}
+.modal-title{flex:1;display:flex;align-items:center;gap:8px;font-size:16px;font-weight:600;min-width:0}
+.modal-title i{color:var(--primary);font-size:19px;flex-shrink:0}
+.modal-title span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modal-close{
+  display:flex;padding:6px;border:0;border-radius:50%;
+  background:none;color:var(--txt3);font-size:20px;cursor:pointer;
+}
+.modal-close:hover{background:var(--bg2);color:var(--txt1)}
+.modal-body{padding:20px;overflow-y:auto}
+.info-meta{font-size:13px;color:var(--txt3)}
+/* 詳細原文 (例: 2016.01 | 疾走感 | シネマティック | 1分53秒/1.72 MB \n 使用楽器：…) */
+.info-desc{
+  font-size:13px;color:var(--txt1);line-height:1.9;white-space:pre-line;
+  background:var(--bg0);border:1px solid var(--border);border-radius:12px;
+  padding:12px 16px;margin-top:12px;
+}
+.modal-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
 
 /* ===== 読み込み中 / エラー表示 ===== */
 .placeholder{color:var(--txt3);font-size:13px;padding:8px 2px;display:flex;align-items:center;gap:8px}
@@ -361,9 +398,27 @@ body.player-open .panel{padding-bottom:calc(var(--player-h) + 32px)}
   </div><!-- /.main -->
 </div><!-- /.wrapper -->
 
+<!-- 素材情報モーダル -->
+<div class="modal-overlay" id="info-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="info-modal-title">
+    <div class="modal-hdr">
+      <div class="modal-title"><i class="ti ti-info-circle" aria-hidden="true"></i> <span id="info-modal-title"></span></div>
+      <button class="modal-close" type="button" id="info-modal-close" aria-label="閉じる"><i class="ti ti-x" aria-hidden="true"></i></button>
+    </div>
+    <div class="modal-body">
+      <p class="info-meta" id="info-modal-meta"></p>
+      <p class="info-desc" id="info-modal-desc"></p>
+      <div class="modal-actions">
+        <button class="m-button" id="info-modal-play" type="button"><i class="ti ti-player-play" aria-hidden="true"></i> <span>再生</span></button>
+        <a class="m-button is-tonal" id="info-modal-page" target="_blank" rel="noopener"><i class="ti ti-external-link" aria-hidden="true"></i> 配布元リンクを開く</a>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- オーディオ再生バー -->
 <div class="player" id="player">
-  <button class="audio-play" id="player-toggle" type="button" aria-label="再生 / 一時停止"><i class="ti ti-player-pause-filled" aria-hidden="true"></i></button>
+  <button class="audio-play" id="player-toggle" type="button" aria-label="再生 / 一時停止"><i class="ti ti-player-pause" aria-hidden="true"></i></button>
   <div class="player-info audio-info">
     <div class="audio-title" id="player-title"></div>
     <div class="audio-author" id="player-author"></div>
@@ -403,6 +458,15 @@ const PROVIDERS = <?= json_encode(require __DIR__ . '/providers.php', JSON_UNESC
 const google = site => q => `https://www.google.com/search?q=site:${site}+${encodeURIComponent(q)}`;
 const providerSearchUrl = (p, q) => p.searchUrl.replaceAll('{q}', encodeURIComponent(q));
 
+/* 「すべて」ピル: ローカル DB 全件 + API 対応プロバイダーの横断検索 */
+const ALL_PROVIDER = { id: '__all', label: 'すべて', mode: 'api' };
+
+/* プロバイダー id → ラベル (「すべて」表示時の出所表記に使う) */
+const PROVIDER_LABELS = {};
+for (const list of Object.values(PROVIDERS)) {
+  for (const p of list) PROVIDER_LABELS[p.id] = p.label;
+}
+
 const TABS = {
   bgm:   { label: 'BGM',       icon: 'music',     sub: 'フリー BGM をプロバイダー横断で検索します。',
            placeholder: '曲の雰囲気やキーワード (例: ピアノ 切ない)' },
@@ -417,7 +481,7 @@ const TABS = {
 /* タブごとの状態: 選択中プロバイダー / 最後に検索した語 */
 const state = {};
 for (const tab of Object.keys(TABS)) {
-  state[tab] = { provider: PROVIDERS[tab][0].id, query: '' };
+  state[tab] = { provider: ALL_PROVIDER.id, query: '' };
 }
 
 /* ===== パネル生成 (全タブ共通テンプレート) ===== */
@@ -436,7 +500,7 @@ function buildPanel(tab) {
         <button class="search-btn" type="submit"><i class="ti ti-search" aria-hidden="true"></i> 検索</button>
       </form>
       <div class="provider-tabs" role="tablist" aria-label="プロバイダー選択">
-        ${PROVIDERS[tab].map((p, i) => `
+        ${[ALL_PROVIDER, ...PROVIDERS[tab]].map((p, i) => `
           <button class="provider-tab${i === 0 ? ' active' : ''}" type="button" role="tab"
                   aria-selected="${i === 0}" data-provider="${p.id}">
             ${p.label}${p.mode === 'link' ? ' <i class="ti ti-external-link ext" aria-hidden="true"></i>' : ''}
@@ -468,6 +532,7 @@ function buildPanel(tab) {
 }
 
 function provider(tab) {
+  if (state[tab].provider === ALL_PROVIDER.id) return ALL_PROVIDER;
   return PROVIDERS[tab].find(p => p.id === state[tab].provider);
 }
 
@@ -485,12 +550,40 @@ async function runSearch(tab) {
 
   let localItems = [];
   try {
-    const res = await fetch(`api.php?provider=local&kind=${tab}&target=${encodeURIComponent(p.id)}&q=${encodeURIComponent(q)}`);
+    const target = p.id === ALL_PROVIDER.id ? '' : p.id;
+    const res = await fetch(`api.php?provider=local&kind=${tab}&target=${encodeURIComponent(target)}&q=${encodeURIComponent(q)}`);
     localItems = (await res.json()).items ?? [];
+    for (const it of localItems) it._src = PROVIDER_LABELS[it.provider] ?? p.label;
   } catch (e) {
     console.error('ローカルDBの取得に失敗:', e);
   }
   if (stale()) return;
+
+  /* すべて: ローカル DB 全件 + API 対応プロバイダーを横断検索して結合する */
+  if (p.id === ALL_PROVIDER.id) {
+    if (q === '') {
+      if (localItems.length > 0) box.replaceChildren(renderItems(localItems, p));
+      else renderIdle(tab);
+      return;
+    }
+    const apiProviders = PROVIDERS[tab].filter(x => x.mode === 'api');
+    const results = await Promise.all(apiProviders.map(async x => {
+      /* キー未設定・失敗したプロバイダーは黙ってスキップする */
+      try {
+        const res = await fetch(`api.php?provider=${encodeURIComponent(x.id)}&q=${encodeURIComponent(q)}`);
+        const d = await res.json();
+        return (d.items ?? []).map(it => ({ ...it, _src: x.label }));
+      } catch { return []; }
+    }));
+    if (stale()) return;
+    const items = [...localItems, ...results.flat()];
+    if (items.length === 0) {
+      box.replaceChildren(placeholderMessage('zoom-question', `「${q}」に一致する素材が見つかりませんでした`));
+      return;
+    }
+    box.replaceChildren(renderItems(items, p));
+    return;
+  }
 
   /* リンク型: 登録済み素材を描画し、サイト内検索は外部リンクボタンで開く */
   if (p.mode === 'link') {
@@ -615,9 +708,9 @@ function noticeCard({ icon, title, html, actions = [] }) {
   return div;
 }
 
-/* 結果メタ行の出所表示 (ローカル DB 登録分には「登録済み」を付ける) */
+/* 結果メタ行の出所表示 (「すべて」表示時は素材ごとのプロバイダー名) */
 function sourceLabel(it, p) {
-  return it.local ? `${p.label} · 登録済み` : p.label;
+  return it._src ?? p.label;
 }
 
 /* ===== 描画: 画像グリッド ===== */
@@ -654,7 +747,7 @@ function renderVideoGrid(items, p) {
     card.innerHTML = `
       <div class="asset-thumb wide">
         <img loading="lazy" alt="">
-        <span class="play-badge"><i class="ti ti-player-play-filled" aria-hidden="true"></i></span>
+        <span class="play-badge"><i class="ti ti-player-play" aria-hidden="true"></i></span>
         <span class="duration"></span>
       </div>
       <div class="asset-meta">
@@ -692,7 +785,7 @@ function renderAudioList(items, p) {
     const row = document.createElement('div');
     row.className = 'audio-row';
     row.innerHTML = `
-      <button class="audio-play" type="button" aria-label="再生"><i class="ti ti-player-play-filled" aria-hidden="true"></i></button>
+      <button class="audio-play" type="button" aria-label="再生 / 一時停止"><i class="ti ti-player-play" aria-hidden="true"></i></button>
       ${it.thumb ? '<img class="audio-thumb" loading="lazy" alt="">' : ''}
       <div class="audio-info">
         <div class="audio-title"></div>
@@ -703,14 +796,75 @@ function renderAudioList(items, p) {
     if (it.thumb) row.querySelector('.audio-thumb').src = it.thumb;
     row.querySelector('.audio-title').textContent = it.title;
     row.querySelector('.audio-author').textContent = it.author ? `${it.author} · ${sourceLabel(it, p)}` : sourceLabel(it, p);
+    /* 詳細の 1 行目 (例: 2019.09 | 幻想的 | ピアノ | 2分37秒/2.40 MB) を一覧にも表示する */
+    const descLine = (it.description ?? '').split('\n')[0];
+    if (descLine) {
+      const desc = document.createElement('div');
+      desc.className = 'audio-desc';
+      desc.textContent = descLine;
+      row.querySelector('.audio-info').append(desc);
+    }
     row.querySelector('.audio-duration').textContent = formatDuration(it.duration);
     const open = row.querySelector('.asset-open');
     if (it.pageUrl) open.href = it.pageUrl; else open.remove();
     row.querySelector('.audio-play').addEventListener('click', () => playAudio(it, row));
+    /* 再生ボタン・リンク以外のカード全体クリックで情報モーダルを開く */
+    row.addEventListener('click', e => {
+      if (e.target.closest('button, a')) return;
+      openInfoModal(it, p, row);
+    });
     list.append(row);
   }
   return list;
 }
+
+/* ===== 情報モーダル (カード全体のクリックで表示) ===== */
+const infoModal = document.getElementById('info-modal');
+let modalItem = null;   /* モーダルが表示している素材 */
+let modalRow  = null;   /* その素材の一覧上の行 (再生状態の照合に使う) */
+
+function openInfoModal(it, p, row = null) {
+  modalItem = it;
+  modalRow  = row;
+  document.getElementById('info-modal-title').textContent = it.title || p.label;
+
+  const meta = [it.author, sourceLabel(it, p), it.duration ? formatDuration(it.duration) : '']
+    .filter(Boolean).join(' · ');
+  document.getElementById('info-modal-meta').textContent = meta;
+
+  /* 詳細原文 (例: 2016.01 | 疾走感 | シネマティック | 1分53秒/1.72 MB + 使用楽器行)。
+     description が無い素材 (API 検索結果など) では枠ごと非表示にする */
+  const desc = document.getElementById('info-modal-desc');
+  desc.textContent = it.description ?? '';
+  desc.hidden = !it.description;
+
+  const page = document.getElementById('info-modal-page');
+  page.href = it.pageUrl || '';
+  page.hidden = !it.pageUrl;
+
+  updateModalPlayButton();
+  infoModal.hidden = false;
+}
+
+function closeInfoModal() { infoModal.hidden = true; }
+
+/* モーダルの再生ボタンを現在の再生状態に合わせる (再生中なら一時停止表示) */
+function updateModalPlayButton() {
+  const btn = document.getElementById('info-modal-play');
+  if (!modalItem || !modalItem.preview) { btn.hidden = true; return; }
+  btn.hidden = false;
+  const playing = modalRow !== null && modalRow === playingRow && !audio.paused;
+  btn.querySelector('i').className = playing ? 'ti ti-player-pause' : 'ti ti-player-play';
+  btn.querySelector('span').textContent = playing ? '一時停止' : '再生';
+}
+
+document.getElementById('info-modal-play').addEventListener('click', () => {
+  if (modalItem) playAudio(modalItem, modalRow);
+});
+
+document.getElementById('info-modal-close').addEventListener('click', closeInfoModal);
+infoModal.addEventListener('click', e => { if (e.target === infoModal) closeInfoModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !infoModal.hidden) closeInfoModal(); });
 
 /* ===== オーディオ再生 (画面下の再生バーで共有 1 トラック再生) ===== */
 const audio = new Audio();
@@ -742,12 +896,12 @@ function playAudio(it, row) {
 function setRowPlaying(row) {
   if (playingRow) {
     playingRow.classList.remove('playing');
-    playingRow.querySelector('.audio-play i').className = 'ti ti-player-play-filled';
+    playingRow.querySelector('.audio-play i').className = 'ti ti-player-play';
   }
   playingRow = row;
   if (row) {
     row.classList.add('playing');
-    row.querySelector('.audio-play i').className = 'ti ti-player-pause-filled';
+    row.querySelector('.audio-play i').className = 'ti ti-player-pause';
   }
 }
 
@@ -760,12 +914,14 @@ audio.addEventListener('pause', () => syncPlayIcons(false));
 audio.addEventListener('ended', () => syncPlayIcons(false));
 
 function syncPlayIcons(playing) {
-  player.toggle.querySelector('i').className = playing ? 'ti ti-player-pause-filled' : 'ti ti-player-play-filled';
+  player.toggle.querySelector('i').className = playing ? 'ti ti-player-pause' : 'ti ti-player-play';
   /* 検索し直しで行が消えていることがあるので isConnected を確認する */
   if (playingRow && playingRow.isConnected) {
     playingRow.classList.toggle('playing', playing);
-    playingRow.querySelector('.audio-play i').className = playing ? 'ti ti-player-pause-filled' : 'ti ti-player-play-filled';
+    playingRow.querySelector('.audio-play i').className = playing ? 'ti ti-player-pause' : 'ti ti-player-play';
   }
+  /* モーダルを開いたまま再生状態が変わったときも追従させる */
+  if (!infoModal.hidden) updateModalPlayButton();
 }
 
 audio.addEventListener('timeupdate', () => {

@@ -27,6 +27,7 @@ function assets_db(): PDO
             title      TEXT    NOT NULL,
             author     TEXT    NOT NULL DEFAULT "",
             tags       TEXT    NOT NULL DEFAULT "",  -- 空白区切りの検索用キーワード
+            description TEXT   NOT NULL DEFAULT "",  -- 詳細情報 (例: 公開年月 | イメージ | ジャンル | 長さ\n使用楽器：…)
             thumb      TEXT    NOT NULL DEFAULT "",  -- サムネイル (uploads/... または URL)
             preview    TEXT    NOT NULL DEFAULT "",  -- 素材本体 (uploads/... または URL)
             page_url   TEXT    NOT NULL DEFAULT "",  -- 配布元ページ (任意)
@@ -34,10 +35,13 @@ function assets_db(): PDO
             created_at INTEGER NOT NULL
         )');
 
-    /* 旧スキーマ (provider 列なし) からのマイグレーション */
+    /* 旧スキーマからのマイグレーション (足りない列を追加する) */
     $cols = array_column($db->query('PRAGMA table_info(assets)')->fetchAll(), 'name');
     if (!in_array('provider', $cols, true)) {
         $db->exec('ALTER TABLE assets ADD COLUMN provider TEXT NOT NULL DEFAULT ""');
+    }
+    if (!in_array('description', $cols, true)) {
+        $db->exec('ALTER TABLE assets ADD COLUMN description TEXT NOT NULL DEFAULT ""');
     }
     return $db;
 }

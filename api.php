@@ -83,27 +83,31 @@ case 'local': {
        部分一致で検索する。空なら新着 50 件。結果は割り当て先プロバイダーの
        一覧の先頭に描画される (local: true が目印) */
     $kind   = $_GET['kind'] ?? '';
-    $target = $_GET['target'] ?? '';
+    $target = $_GET['target'] ?? '';   /* 空なら全プロバイダー横断 (「すべて」ピル用) */
     if (!in_array($kind, ASSET_KINDS, true)) fail('bad_kind', 400);
-    $db = assets_db();
-    if ($q === '') {
-        $stmt = $db->prepare('SELECT * FROM assets WHERE kind = :k AND provider = :p
-                              ORDER BY id DESC LIMIT 50');
-        $stmt->execute([':k' => $kind, ':p' => $target]);
-    } else {
-        $stmt = $db->prepare('SELECT * FROM assets WHERE kind = :k AND provider = :p
-                              AND (title LIKE :q OR tags LIKE :q OR author LIKE :q)
-                              ORDER BY id DESC LIMIT 50');
-        $stmt->execute([':k' => $kind, ':p' => $target, ':q' => '%' . $q . '%']);
+    $db     = assets_db();
+    $where  = 'kind = :k';
+    $params = [':k' => $kind];
+    if ($target !== '') {
+        $where .= ' AND provider = :p';
+        $params[':p'] = $target;
     }
+    if ($q !== '') {
+        $where .= ' AND (title LIKE :q OR tags LIKE :q OR author LIKE :q)';
+        $params[':q'] = '%' . $q . '%';
+    }
+    $stmt = $db->prepare("SELECT * FROM assets WHERE {$where} ORDER BY id DESC LIMIT 50");
+    $stmt->execute($params);
     $type  = $kind === 'image' ? 'image' : ($kind === 'video' ? 'video' : 'audio');
     $items = [];
     foreach ($stmt as $row) {
         $items[] = [
-            'type'     => $type,
-            'local'    => true,
-            'title'    => $row['title'],
-            'author'   => $row['author'],
+            'type'        => $type,
+            'local'       => true,
+            'provider'    => $row['provider'],
+            'title'       => $row['title'],
+            'description' => $row['description'],
+            'author'      => $row['author'],
             'thumb'    => $row['thumb'] !== '' ? $row['thumb'] : ($type === 'image' ? $row['preview'] : ''),
             'full'     => $row['preview'] !== '' ? $row['preview'] : $row['thumb'],
             'preview'  => $row['preview'],
