@@ -218,6 +218,12 @@ a{color:inherit}
 .audio-author{font-size:12px;color:var(--txt3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .audio-duration{font-size:12px;color:var(--txt3);flex-shrink:0}
 
+/* リンク型プロバイダーのサイト内検索ボタン行 (結果一覧の上) */
+.link-search-row{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px}
+
+/* 結果一覧の後ろに続く案内カード (キー未設定など) は間隔を空ける */
+.results > * + .notice-card{margin-top:16px}
+
 /* ===== 案内カード (リンク型プロバイダー / キー未設定) ===== */
 .notice-card{
   background:var(--bg1);border:1px solid var(--border);border-radius:var(--radius);
@@ -387,54 +393,15 @@ body.player-open .panel{padding-bottom:calc(var(--player-h) + 32px)}
 </nav>
 
 <script>
-/* ===== プロバイダー定義 =====
+/* ===== プロバイダー定義 (providers.php と共有) =====
    mode: 'api'  → api.php 経由でインライン検索 (id は api.php の provider 名)
-         'link' → 各サイトの検索ページを新しいタブで開く (url(q) がテンプレート)
-   keyName: 'api' のとき config.php のどのキーを使うか (未設定案内に使う) */
+         'link' → searchUrl の {q} を検索語に置換して新しいタブで開く
+   どのプロバイダーでも、ローカル DB でそのプロバイダーに割り当てた素材を
+   一覧の先頭に描画する */
+const PROVIDERS = <?= json_encode(require __DIR__ . '/providers.php', JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+
 const google = site => q => `https://www.google.com/search?q=site:${site}+${encodeURIComponent(q)}`;
-
-/* 各タブ共通のローカル DB プロバイダー (api.php の provider=local + kind=タブ名) */
-const localProvider = { id: 'local', label: 'ローカルDB', icon: 'database', mode: 'api', local: true };
-
-const PROVIDERS = {
-  bgm: [
-    { ...localProvider },
-    { id: 'jamendo',  label: 'Jamendo',          icon: 'brand-vimeo',  mode: 'api',  keyName: 'jamendo',
-      keyUrl: 'https://devportal.jamendo.com/', site: 'jamendo.com' },
-    { id: 'dova',     label: 'DOVA-SYNDROME',    icon: 'external-link', mode: 'link', url: google('dova-s.jp') },
-    { id: 'maou-bgm', label: '魔王魂',            icon: 'external-link', mode: 'link', url: q => `https://maou.audio/?s=${encodeURIComponent(q)}` },
-    { id: 'amacha',   label: '甘茶の音楽工房',     icon: 'external-link', mode: 'link', url: google('amachamusic.chagasi.com') },
-    { id: 'musmus',   label: 'MusMus',           icon: 'external-link', mode: 'link', url: google('musmus.main.jp') },
-  ],
-  se: [
-    { ...localProvider },
-    { id: 'freesound', label: 'Freesound',       icon: 'wave-square',  mode: 'api',  keyName: 'freesound',
-      keyUrl: 'https://freesound.org/apiv2/apply/', site: 'freesound.org' },
-    { id: 'selab',     label: '効果音ラボ',        icon: 'external-link', mode: 'link', url: google('soundeffect-lab.info') },
-    { id: 'otologic',  label: 'OtoLogic',        icon: 'external-link', mode: 'link', url: q => `https://otologic.jp/?s=${encodeURIComponent(q)}` },
-    { id: 'maou-se',   label: '魔王魂',           icon: 'external-link', mode: 'link', url: q => `https://maou.audio/?s=${encodeURIComponent(q)}` },
-  ],
-  image: [
-    { ...localProvider },
-    { id: 'pixabay-image', label: 'Pixabay',     icon: 'photo-search', mode: 'api',  keyName: 'pixabay',
-      keyUrl: 'https://pixabay.com/api/docs/', site: 'pixabay.com' },
-    { id: 'pexels-image',  label: 'Pexels',      icon: 'photo-search', mode: 'api',  keyName: 'pexels',
-      keyUrl: 'https://www.pexels.com/api/', site: 'pexels.com' },
-    { id: 'unsplash',      label: 'Unsplash',    icon: 'brand-unsplash', mode: 'api', keyName: 'unsplash',
-      keyUrl: 'https://unsplash.com/developers', site: 'unsplash.com' },
-    { id: 'irasutoya',     label: 'いらすとや',    icon: 'external-link', mode: 'link', url: q => `https://www.irasutoya.com/search?q=${encodeURIComponent(q)}` },
-    { id: 'photoac',       label: '写真AC',       icon: 'external-link', mode: 'link', url: q => `https://www.photo-ac.com/main/search?q=${encodeURIComponent(q)}` },
-  ],
-  video: [
-    { ...localProvider },
-    { id: 'pixabay-video', label: 'Pixabay',     icon: 'video',        mode: 'api',  keyName: 'pixabay',
-      keyUrl: 'https://pixabay.com/api/docs/', site: 'pixabay.com' },
-    { id: 'pexels-video',  label: 'Pexels',      icon: 'video',        mode: 'api',  keyName: 'pexels',
-      keyUrl: 'https://www.pexels.com/api/', site: 'pexels.com' },
-    { id: 'videoac',       label: '動画AC',       icon: 'external-link', mode: 'link', url: google('video-ac.com') },
-    { id: 'coverr',        label: 'Coverr',      icon: 'external-link', mode: 'link', url: q => `https://coverr.co/search?q=${encodeURIComponent(q)}` },
-  ],
-};
+const providerSearchUrl = (p, q) => p.searchUrl.replaceAll('{q}', encodeURIComponent(q));
 
 const TABS = {
   bgm:   { label: 'BGM',       icon: 'music',     sub: 'フリー BGM をプロバイダー横断で検索します。',
@@ -482,7 +449,7 @@ function buildPanel(tab) {
   panel.querySelector('form').addEventListener('submit', e => {
     e.preventDefault();
     state[tab].query = panel.querySelector('input').value.trim();
-    runSearch(tab, true);
+    runSearch(tab);
   });
 
   /* プロバイダーピル */
@@ -493,89 +460,120 @@ function buildPanel(tab) {
       b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
     });
     state[tab].provider = btn.dataset.provider;
-    runSearch(tab, false);
+    runSearch(tab);
   }));
 
-  /* 初期表示: ローカル DB が選択されているので新着一覧を読み込む */
-  runSearch(tab, false);
+  /* 初期表示: 先頭プロバイダーに割り当てた登録済み素材を読み込む */
+  runSearch(tab);
 }
 
 function provider(tab) {
   return PROVIDERS[tab].find(p => p.id === state[tab].provider);
 }
 
-/* ===== 検索実行 ===== */
-async function runSearch(tab, submitted) {
+/* ===== 検索実行 =====
+   どのプロバイダーを選んでいても、まずローカル DB からそのプロバイダーに
+   割り当てた素材を取得して一覧の先頭に描画する。API 型はさらにオンライン
+   検索結果を続けて表示し、リンク型は登録済み素材 + サイト内検索ボタンを出す */
+async function runSearch(tab) {
   const p = provider(tab);
   const q = state[tab].query;
   const box = document.getElementById('results-' + tab);
+  const stale = () => state[tab].provider !== p.id || state[tab].query !== q;
 
-  /* ローカル DB はキーワード空でも新着一覧を表示する */
-  if (q === '' && !p.local) { renderIdle(tab); return; }
+  box.replaceChildren(placeholderMessage('loader-2 spin', '検索中…'));
 
-  /* リンク型: 検索ボタンで新しいタブに開く。ピル切り替え時は案内だけ出す */
+  let localItems = [];
+  try {
+    const res = await fetch(`api.php?provider=local&kind=${tab}&target=${encodeURIComponent(p.id)}&q=${encodeURIComponent(q)}`);
+    localItems = (await res.json()).items ?? [];
+  } catch (e) {
+    console.error('ローカルDBの取得に失敗:', e);
+  }
+  if (stale()) return;
+
+  /* リンク型: 登録済み素材を描画し、サイト内検索は外部リンクボタンで開く */
   if (p.mode === 'link') {
-    if (submitted) window.open(p.url(q), '_blank', 'noopener');
-    box.replaceChildren(noticeCard({
-      icon: 'external-link',
-      title: `${p.label} はサイト内検索を開きます`,
-      html: `${p.label} は API を公開していないため、検索結果は ${p.label} のページで表示されます。`,
-      actions: [{ label: `${p.label} で「${q}」を検索`, icon: 'external-link', href: p.url(q) }],
-    }));
+    const frag = document.createDocumentFragment();
+    if (q !== '') {
+      const row = document.createElement('div');
+      row.className = 'link-search-row';
+      row.append(...noticeActions([{ label: `${p.label} のサイトで「${q}」を検索`, icon: 'external-link', tonal: true,
+                                     href: providerSearchUrl(p, q) }]));
+      frag.append(row);
+    }
+    if (localItems.length > 0) {
+      frag.append(renderItems(localItems, p));
+    } else if (q === '') {
+      frag.append(noticeCard({
+        icon: 'database-off',
+        title: `${p.label} に登録済みの素材はありません`,
+        html: `登録画面で ${p.label} に割り当てて素材を追加すると、ここに一覧表示されます。<br>` +
+              `${p.label} は API を公開していないため、キーワード検索はサイト内検索を開きます。`,
+        actions: [{ label: '素材を登録する', icon: 'database-plus', href: 'admin.php', self: true }],
+      }));
+    } else {
+      frag.append(placeholderMessage('zoom-question', `登録済み素材に「${q}」は見つかりませんでした`));
+    }
+    box.replaceChildren(frag);
     return;
   }
 
-  /* API 型 */
-  box.replaceChildren(placeholderMessage('loader-2 spin', '検索中…'));
+  /* API 型: キーワード空なら登録済み素材のみ表示する */
+  if (q === '') {
+    if (localItems.length > 0) box.replaceChildren(renderItems(localItems, p));
+    else renderIdle(tab);
+    return;
+  }
+
   let data;
   try {
-    const kind = p.local ? `&kind=${tab}` : '';
-    const res = await fetch(`api.php?provider=${encodeURIComponent(p.id)}&q=${encodeURIComponent(q)}${kind}`);
+    const res = await fetch(`api.php?provider=${encodeURIComponent(p.id)}&q=${encodeURIComponent(q)}`);
     data = await res.json();
   } catch (e) {
     console.error('検索に失敗:', e);
-    box.replaceChildren(placeholderMessage('alert-circle', '検索に失敗しました'));
-    return;
+    data = { error: 'http' };
   }
-
-  /* 状態が変わっていたら描画しない (連打対策) */
-  if (state[tab].provider !== p.id || state[tab].query !== q) return;
+  if (stale()) return;
 
   if (data.error === 'no_key') {
-    box.replaceChildren(noticeCard({
+    const notice = noticeCard({
       icon: 'key',
       title: `${p.label} の API キーが未設定です`,
       html: `<code>config.php</code> の <code>${p.keyName}</code> にキーを設定すると、ここに検索結果が表示されます。`,
       actions: [
         { label: 'API キーを取得', icon: 'key', href: p.keyUrl },
-        { label: `${p.label} のサイトで検索`, icon: 'external-link', tonal: true,
-          href: google(p.site)(q) },
+        { label: `${p.label} のサイトで検索`, icon: 'external-link', tonal: true, href: google(p.site)(q) },
       ],
-    }));
-    return;
-  }
-  if (data.error) {
-    box.replaceChildren(placeholderMessage('alert-circle', `検索に失敗しました (${data.error})`));
-    return;
-  }
-  if (!data.items || data.items.length === 0) {
-    if (p.local && q === '') {
-      box.replaceChildren(noticeCard({
-        icon: 'database',
-        title: 'ローカルDB にまだ素材がありません',
-        html: '登録画面から素材を追加すると、ここに一覧表示されます。',
-        actions: [{ label: '素材を登録する', icon: 'database-plus', href: 'admin.php', self: true }],
-      }));
+    });
+    if (localItems.length > 0) {
+      const frag = document.createDocumentFragment();
+      frag.append(renderItems(localItems, p), notice);
+      box.replaceChildren(frag);
     } else {
-      box.replaceChildren(placeholderMessage('zoom-question', `「${q}」に一致する素材が見つかりませんでした`));
+      box.replaceChildren(notice);
     }
     return;
   }
 
-  const kind = data.items[0].type;
-  if (kind === 'audio')      renderAudioList(box, data.items, p);
-  else if (kind === 'video') renderVideoGrid(box, data.items, p);
-  else                       renderImageGrid(box, data.items, p);
+  const items = [...localItems, ...(data.error ? [] : (data.items ?? []))];
+  if (data.error && items.length === 0) {
+    box.replaceChildren(placeholderMessage('alert-circle', `検索に失敗しました (${data.error})`));
+    return;
+  }
+  if (items.length === 0) {
+    box.replaceChildren(placeholderMessage('zoom-question', `「${q}」に一致する素材が見つかりませんでした`));
+    return;
+  }
+  box.replaceChildren(renderItems(items, p));
+}
+
+/* 種別に応じたレンダラーへ振り分けて要素を返す */
+function renderItems(items, p) {
+  const kind = items[0].type;
+  if (kind === 'audio') return renderAudioList(items, p);
+  if (kind === 'video') return renderVideoGrid(items, p);
+  return renderImageGrid(items, p);
 }
 
 /* ===== 描画: 待機状態 ===== */
@@ -592,6 +590,18 @@ function placeholderMessage(icon, text) {
   return p;
 }
 
+function noticeActions(actions) {
+  return actions.map(a => {
+    const btn = document.createElement('a');
+    btn.className = 'm-button' + (a.tonal ? ' is-tonal' : '');
+    btn.href = a.href;
+    if (!a.self) { btn.target = '_blank'; btn.rel = 'noopener'; }
+    btn.innerHTML = `<i class="ti ti-${a.icon}" aria-hidden="true"></i> `;
+    btn.append(a.label);
+    return btn;
+  });
+}
+
 function noticeCard({ icon, title, html, actions = [] }) {
   const div = document.createElement('div');
   div.className = 'notice-card';
@@ -601,21 +611,17 @@ function noticeCard({ icon, title, html, actions = [] }) {
     <p>${html}</p>
     <div class="notice-actions"></div>`;
   div.querySelector('h2').textContent = title;
-  const wrap = div.querySelector('.notice-actions');
-  for (const a of actions) {
-    const btn = document.createElement('a');
-    btn.className = 'm-button' + (a.tonal ? ' is-tonal' : '');
-    btn.href = a.href;
-    if (!a.self) { btn.target = '_blank'; btn.rel = 'noopener'; }
-    btn.innerHTML = `<i class="ti ti-${a.icon}" aria-hidden="true"></i> `;
-    btn.append(a.label);
-    wrap.append(btn);
-  }
+  div.querySelector('.notice-actions').append(...noticeActions(actions));
   return div;
 }
 
+/* 結果メタ行の出所表示 (ローカル DB 登録分には「登録済み」を付ける) */
+function sourceLabel(it, p) {
+  return it.local ? `${p.label} · 登録済み` : p.label;
+}
+
 /* ===== 描画: 画像グリッド ===== */
-function renderImageGrid(box, items, p) {
+function renderImageGrid(items, p) {
   const grid = document.createElement('div');
   grid.className = 'grid';
   for (const it of items) {
@@ -632,14 +638,14 @@ function renderImageGrid(box, items, p) {
       </div>`;
     a.querySelector('img').src = it.thumb;
     a.querySelector('h3').textContent = it.title || p.label;
-    a.querySelector('p').textContent = it.author ? `by ${it.author} · ${p.label}` : p.label;
+    a.querySelector('p').textContent = it.author ? `by ${it.author} · ${sourceLabel(it, p)}` : sourceLabel(it, p);
     grid.append(a);
   }
-  box.replaceChildren(grid);
+  return grid;
 }
 
 /* ===== 描画: 動画グリッド (クリックでインライン再生) ===== */
-function renderVideoGrid(box, items, p) {
+function renderVideoGrid(items, p) {
   const grid = document.createElement('div');
   grid.className = 'grid';
   for (const it of items) {
@@ -658,7 +664,7 @@ function renderVideoGrid(box, items, p) {
     card.querySelector('img').src = it.thumb;
     card.querySelector('.duration').textContent = formatDuration(it.duration);
     card.querySelector('h3').textContent = it.title || p.label;
-    card.querySelector('p').textContent = it.author ? `by ${it.author} · ${p.label}` : p.label;
+    card.querySelector('p').textContent = it.author ? `by ${it.author} · ${sourceLabel(it, p)}` : sourceLabel(it, p);
     const open = card.querySelector('.asset-open');
     if (it.pageUrl) open.href = it.pageUrl; else open.remove();
 
@@ -675,11 +681,11 @@ function renderVideoGrid(box, items, p) {
     }, { once: true });
     grid.append(card);
   }
-  box.replaceChildren(grid);
+  return grid;
 }
 
 /* ===== 描画: オーディオリスト ===== */
-function renderAudioList(box, items, p) {
+function renderAudioList(items, p) {
   const list = document.createElement('div');
   list.className = 'audio-list';
   for (const it of items) {
@@ -696,14 +702,14 @@ function renderAudioList(box, items, p) {
       <a class="asset-open" target="_blank" rel="noopener" title="配布ページを開く"><i class="ti ti-external-link" aria-hidden="true"></i></a>`;
     if (it.thumb) row.querySelector('.audio-thumb').src = it.thumb;
     row.querySelector('.audio-title').textContent = it.title;
-    row.querySelector('.audio-author').textContent = it.author ? `${it.author} · ${p.label}` : p.label;
+    row.querySelector('.audio-author').textContent = it.author ? `${it.author} · ${sourceLabel(it, p)}` : sourceLabel(it, p);
     row.querySelector('.audio-duration').textContent = formatDuration(it.duration);
     const open = row.querySelector('.asset-open');
     if (it.pageUrl) open.href = it.pageUrl; else open.remove();
     row.querySelector('.audio-play').addEventListener('click', () => playAudio(it, row));
     list.append(row);
   }
-  box.replaceChildren(list);
+  return list;
 }
 
 /* ===== オーディオ再生 (画面下の再生バーで共有 1 トラック再生) ===== */

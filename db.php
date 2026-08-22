@@ -23,6 +23,7 @@ function assets_db(): PDO
         CREATE TABLE IF NOT EXISTS assets (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             kind       TEXT    NOT NULL,             -- bgm | se | image | video
+            provider   TEXT    NOT NULL DEFAULT "",  -- 割り当て先プロバイダー id (providers.php)
             title      TEXT    NOT NULL,
             author     TEXT    NOT NULL DEFAULT "",
             tags       TEXT    NOT NULL DEFAULT "",  -- 空白区切りの検索用キーワード
@@ -32,5 +33,11 @@ function assets_db(): PDO
             duration   REAL    NOT NULL DEFAULT 0,   -- 秒 (音声・動画のみ)
             created_at INTEGER NOT NULL
         )');
+
+    /* 旧スキーマ (provider 列なし) からのマイグレーション */
+    $cols = array_column($db->query('PRAGMA table_info(assets)')->fetchAll(), 'name');
+    if (!in_array('provider', $cols, true)) {
+        $db->exec('ALTER TABLE assets ADD COLUMN provider TEXT NOT NULL DEFAULT ""');
+    }
     return $db;
 }

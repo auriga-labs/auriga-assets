@@ -5,6 +5,15 @@
    注意: 認証は無いので、公開サーバーに置く場合は Basic 認証などで保護すること。 */
 require __DIR__ . '/db.php';
 
+/* 割り当て可能なプロバイダー (検索画面のピルと共通の定義) */
+$PROVIDERS = require __DIR__ . '/providers.php';
+
+/* 一覧のチップ表示用: kind → provider id → ラベル */
+$PROVIDER_LABELS = [];
+foreach ($PROVIDERS as $k => $list) {
+    foreach ($list as $p) $PROVIDER_LABELS[$k][$p['id']] = $p['label'];
+}
+
 const KIND_LABELS = ['bgm' => 'BGM', 'se' => 'SE (効果音)', 'image' => '画像', 'video' => '動画'];
 const KIND_ICONS  = ['bgm' => 'music', 'se' => 'wave-sine', 'image' => 'photo', 'video' => 'video'];
 
@@ -61,16 +70,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!in_array($kind, ASSET_KINDS, true)) throw new RuntimeException('種別を選択してください');
             if ($title === '')                       throw new RuntimeException('タイトルを入力してください');
 
+            $providerId = $_POST['provider'] ?? '';
+            if (!in_array($providerId, array_column($PROVIDERS[$kind], 'id'), true)) {
+                throw new RuntimeException('割り当て先プロバイダーを選択してください');
+            }
+
             $preview = save_upload('preview_file') ?? trim($_POST['preview_url'] ?? '');
             $thumb   = save_upload('thumb_file')   ?? trim($_POST['thumb_url'] ?? '');
             if ($preview === '' && $thumb === '') {
                 throw new RuntimeException('素材ファイルをアップロードするか、素材 URL を入力してください');
             }
 
-            $stmt = $db->prepare('INSERT INTO assets (kind, title, author, tags, thumb, preview, page_url, duration, created_at)
-                                  VALUES (:kind, :title, :author, :tags, :thumb, :preview, :page_url, :duration, :now)');
+            $stmt = $db->prepare('INSERT INTO assets (kind, provider, title, author, tags, thumb, preview, page_url, duration, created_at)
+                                  VALUES (:kind, :provider, :title, :author, :tags, :thumb, :preview, :page_url, :duration, :now)');
             $stmt->execute([
                 ':kind'     => $kind,
+                ':provider' => $providerId,
                 ':title'    => $title,
                 ':author'   => trim($_POST['author'] ?? ''),
                 ':tags'     => trim($_POST['tags'] ?? ''),
@@ -179,14 +194,14 @@ a{color:inherit}
 .field.span2{grid-column:span 2}
 .field label{font-size:12px;font-weight:600;color:var(--txt2)}
 .field label small{font-weight:400;color:var(--txt3)}
-.field input[type=text],.field input[type=url],.field input[type=number]{
+.field input[type=text],.field input[type=url],.field input[type=number],.field select{
   height:42px;padding:0 14px;
   border:1px solid var(--border);border-radius:12px;
   background:var(--bg1);color:var(--txt1);
   font-family:inherit;font-size:14px;outline:none;
   transition:border-color .15s,box-shadow .15s;
 }
-.field input:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-dim)}
+.field input:focus,.field select:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-dim)}
 .field input[type=file]{
   padding:9px 10px;border:1px dashed var(--border);border-radius:12px;
   background:var(--bg0);font-family:inherit;font-size:13px;color:var(--txt2);
@@ -253,6 +268,8 @@ a{color:inherit}
   font-size:11px;font-weight:600;
 }
 .kind-chip i{font-size:13px}
+/* 割り当て先プロバイダーのチップ (種別チップの隣) */
+.provider-chip{background:var(--bg2);color:var(--txt2);border:1px solid var(--border)}
 .asset-row-info{min-width:0;flex:1}
 .asset-row-title{font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .asset-row-sub{font-size:12px;color:var(--txt3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
@@ -308,6 +325,16 @@ a{color:inherit}
           <label for="kind-<?= $k ?>"><i class="ti ti-<?= KIND_ICONS[$k] ?>" aria-hidden="true"></i> <?= $label ?></label>
 <?php endforeach; ?>
         </div>
+      </div>
+
+      <div class="field span2">
+        <label for="f-provider">割り当て先プロバイダー * <small>(検索画面でこのプロバイダーの一覧に表示されます)</small></label>
+        <select id="f-provider" name="provider">
+<?php $formKind = in_array($_POST['kind'] ?? '', ASSET_KINDS, true) ? $_POST['kind'] : 'bgm'; ?>
+<?php foreach ($PROVIDERS[$formKind] as $p): ?>
+          <option value="<?= h($p['id']) ?>" <?= ($_POST['provider'] ?? '') === $p['id'] ? 'selected' : '' ?>><?= h($p['label']) ?></option>
+<?php endforeach; ?>
+        </select>
       </div>
 
       <div class="field">
@@ -380,6 +407,7 @@ a{color:inherit}
 <?php endif; ?>
       </div>
       <span class="kind-chip"><i class="ti ti-<?= KIND_ICONS[$r['kind']] ?? 'file' ?>" aria-hidden="true"></i> <?= KIND_LABELS[$r['kind']] ?? h($r['kind']) ?></span>
+      <span class="kind-chip provider-chip"><?= h($PROVIDER_LABELS[$r['kind']][$r['provider']] ?? '未割り当て') ?></span>
       <div class="asset-row-info">
         <div class="asset-row-title"><?= h($r['title']) ?></div>
         <div class="asset-row-sub">
@@ -403,6 +431,23 @@ a{color:inherit}
 </div>
 
 <script>
+/* 種別を切り替えたら、割り当て先プロバイダーの選択肢をその種別のものに入れ替える */
+const PROVIDERS_BY_KIND = <?= json_encode(
+    array_map(fn($list) => array_map(fn($p) => ['id' => $p['id'], 'label' => $p['label']], $list), $PROVIDERS),
+    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+
+function fillProviderOptions(kind) {
+  const sel = document.getElementById('f-provider');
+  sel.replaceChildren(...PROVIDERS_BY_KIND[kind].map(p => {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = p.label;
+    return o;
+  }));
+}
+document.querySelectorAll('input[name=kind]').forEach(r =>
+  r.addEventListener('change', () => fillProviderOptions(r.value)));
+
 /* 素材ファイルに音声/動画を選んだら、長さ (秒) を自動入力する */
 document.getElementById('f-preview-file').addEventListener('change', e => {
   const f = e.target.files[0];

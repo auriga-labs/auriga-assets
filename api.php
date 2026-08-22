@@ -78,25 +78,30 @@ $eq = rawurlencode($q);
 switch ($provider) {
 
 case 'local': {
-    /* ローカル素材 DB (SQLite)。kind=bgm|se|image|video で絞り込み、
-       キーワードはタイトル・タグ・作者を部分一致で検索する。空なら新着 50 件 */
-    $kind = $_GET['kind'] ?? '';
+    /* ローカル素材 DB (SQLite)。kind=bgm|se|image|video と割り当て先プロバイダー
+       (target=providers.php の id) で絞り込み、キーワードはタイトル・タグ・作者を
+       部分一致で検索する。空なら新着 50 件。結果は割り当て先プロバイダーの
+       一覧の先頭に描画される (local: true が目印) */
+    $kind   = $_GET['kind'] ?? '';
+    $target = $_GET['target'] ?? '';
     if (!in_array($kind, ASSET_KINDS, true)) fail('bad_kind', 400);
     $db = assets_db();
     if ($q === '') {
-        $stmt = $db->prepare('SELECT * FROM assets WHERE kind = :k ORDER BY id DESC LIMIT 50');
-        $stmt->execute([':k' => $kind]);
+        $stmt = $db->prepare('SELECT * FROM assets WHERE kind = :k AND provider = :p
+                              ORDER BY id DESC LIMIT 50');
+        $stmt->execute([':k' => $kind, ':p' => $target]);
     } else {
-        $stmt = $db->prepare('SELECT * FROM assets WHERE kind = :k
+        $stmt = $db->prepare('SELECT * FROM assets WHERE kind = :k AND provider = :p
                               AND (title LIKE :q OR tags LIKE :q OR author LIKE :q)
                               ORDER BY id DESC LIMIT 50');
-        $stmt->execute([':k' => $kind, ':q' => '%' . $q . '%']);
+        $stmt->execute([':k' => $kind, ':p' => $target, ':q' => '%' . $q . '%']);
     }
     $type  = $kind === 'image' ? 'image' : ($kind === 'video' ? 'video' : 'audio');
     $items = [];
     foreach ($stmt as $row) {
         $items[] = [
             'type'     => $type,
+            'local'    => true,
             'title'    => $row['title'],
             'author'   => $row['author'],
             'thumb'    => $row['thumb'] !== '' ? $row['thumb'] : ($type === 'image' ? $row['preview'] : ''),
