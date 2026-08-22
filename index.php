@@ -173,6 +173,21 @@ a{color:inherit}
 .provider-tab .cnt{font-size:11px;font-weight:600;color:var(--txt3)}
 .provider-tab.active .cnt{color:var(--primary)}
 
+/* ===== 並び順セレクト ===== */
+.sort-row{
+  display:flex;justify-content:flex-end;align-items:center;gap:8px;
+  margin:-8px 0 14px;
+  font-size:12px;color:var(--txt3);
+}
+.sort-select{
+  height:34px;padding:0 12px;
+  border:1px solid var(--border);border-radius:999px;
+  background:var(--bg1);color:var(--txt2);
+  font-family:inherit;font-size:12px;outline:none;cursor:pointer;
+  transition:border-color .15s,box-shadow .15s;
+}
+.sort-select:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-dim)}
+
 /* ===== 結果: 画像 / 動画グリッド ===== */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
 
@@ -503,11 +518,22 @@ const TABS = {
            placeholder: '動画のキーワード (例: 海, タイムラプス)' },
 };
 
-/* タブごとの状態: 選択中プロバイダー / 最後に検索した語 */
+/* タブごとの状態: 選択中プロバイダー / 最後に検索した語 / 並び順 /
+   最後に描画した結果 (並び替え時の再描画に使う) */
 const state = {};
 for (const tab of Object.keys(TABS)) {
-  state[tab] = { provider: ALL_PROVIDER.id, query: '' };
+  state[tab] = { provider: ALL_PROVIDER.id, query: '', sort: 'date-new', rendered: null };
 }
+
+/* 並び順の選択肢 (画像タブには出さない。投稿日時・再生時間で並び替える)
+   デフォルトは投稿日時の降順 (年月が同じなら名前順) */
+const SORT_OPTIONS = [
+  ['default',   '標準 (取得順)'],
+  ['date-new',  '投稿日時が新しい順'],
+  ['date-old',  '投稿日時が古い順'],
+  ['dur-long',  '再生時間が長い順'],
+  ['dur-short', '再生時間が短い順'],
+];
 
 /* ===== パネル生成 (全タブ共通テンプレート) ===== */
 function buildPanel(tab) {
@@ -534,6 +560,14 @@ function buildPanel(tab) {
             ${p.label} <span class="cnt">${providerCount(tab, p.id)}</span>
           </button>`).join('')}
       </div>
+      ${tab !== 'image' ? `
+      <div class="sort-row">
+        <label for="sort-${tab}">並び順</label>
+        <select class="sort-select" id="sort-${tab}">
+          ${SORT_OPTIONS.map(([v, label]) =>
+            `<option value="${v}"${v === state[tab].sort ? ' selected' : ''}>${label}</option>`).join('')}
+        </select>
+      </div>` : ''}
       <div class="results" id="results-${tab}"></div>
     </div>`;
 
@@ -554,6 +588,13 @@ function buildPanel(tab) {
     state[tab].provider = btn.dataset.provider;
     runSearch(tab);
   }));
+
+  /* 並び順セレクト (画像タブには無い)。再検索せずその場で並び替える */
+  const sortSel = panel.querySelector('.sort-select');
+  if (sortSel) sortSel.addEventListener('change', () => {
+    state[tab].sort = sortSel.value;
+    resortResults(tab);
+  });
 
   /* 初期表示: 先頭プロバイダーに割り当てた登録済み素材を読み込む */
   runSearch(tab);
@@ -590,7 +631,7 @@ async function runSearch(tab) {
   /* すべて: ローカル DB 全件 + API 対応プロバイダーを横断検索して結合する */
   if (p.id === ALL_PROVIDER.id) {
     if (q === '') {
-      if (localItems.length > 0) box.replaceChildren(renderItems(localItems, p));
+      if (localItems.length > 0) box.replaceChildren(renderItems(localItems, p, tab));
       else renderIdle(tab);
       return;
     }
@@ -609,7 +650,7 @@ async function runSearch(tab) {
       box.replaceChildren(placeholderMessage('zoom-question', `「${q}」に一致する素材が見つかりませんでした`));
       return;
     }
-    box.replaceChildren(renderItems(items, p));
+    box.replaceChildren(renderItems(items, p, tab));
     return;
   }
 
@@ -624,7 +665,7 @@ async function runSearch(tab) {
       frag.append(row);
     }
     if (localItems.length > 0) {
-      frag.append(renderItems(localItems, p));
+      frag.append(renderItems(localItems, p, tab));
     } else if (q === '') {
       frag.append(noticeCard({
         icon: 'database-off',
@@ -642,7 +683,7 @@ async function runSearch(tab) {
 
   /* API 型: キーワード空なら登録済み素材のみ表示する */
   if (q === '') {
-    if (localItems.length > 0) box.replaceChildren(renderItems(localItems, p));
+    if (localItems.length > 0) box.replaceChildren(renderItems(localItems, p, tab));
     else renderIdle(tab);
     return;
   }
@@ -669,7 +710,7 @@ async function runSearch(tab) {
     });
     if (localItems.length > 0) {
       const frag = document.createDocumentFragment();
-      frag.append(renderItems(localItems, p), notice);
+      frag.append(renderItems(localItems, p, tab), notice);
       box.replaceChildren(frag);
     } else {
       box.replaceChildren(notice);
@@ -686,15 +727,57 @@ async function runSearch(tab) {
     box.replaceChildren(placeholderMessage('zoom-question', `「${q}」に一致する素材が見つかりませんでした`));
     return;
   }
-  box.replaceChildren(renderItems(items, p));
+  box.replaceChildren(renderItems(items, p, tab));
 }
 
-/* 種別に応じたレンダラーへ振り分けて要素を返す */
-function renderItems(items, p) {
+/* ===== 並び替え =====
+   投稿日時は説明文の先頭にある「2019.04」形式の年月 (配布元の公開年月) を
+   キーにする (DB の登録日時は一括インポートで全件同じため使わない)。
+   年月や再生時間が無い素材は、どの並び順でも末尾に回す */
+function itemDate(it) {
+  const m = /^(\d{4})\.(\d{1,2})/.exec(it.description ?? '');
+  return m ? +m[1] * 12 + +m[2] : null;
+}
+
+const SORT_KEYS = {
+  'date-new':  [itemDate, -1],
+  'date-old':  [itemDate, 1],
+  'dur-long':  [it => it.duration > 0 ? it.duration : null, -1],
+  'dur-short': [it => it.duration > 0 ? it.duration : null, 1],
+};
+
+function sortItems(tab, items) {
+  const mode = state[tab].sort;
+  if (!(mode in SORT_KEYS)) return items;
+  const [keyFn, dir] = SORT_KEYS[mode];
+  /* 年月は月までしかないため同値が多い。同値は名前順で安定させる */
+  const byTitle = (a, b) => (a.title ?? '').localeCompare(b.title ?? '', 'ja');
+  return [...items].sort((a, b) => {
+    const ka = keyFn(a), kb = keyFn(b);
+    if (ka === null && kb === null) return byTitle(a, b);
+    if (ka === null) return 1;
+    if (kb === null) return -1;
+    return dir * (ka - kb) || byTitle(a, b);
+  });
+}
+
+/* 種別に応じたレンダラーへ振り分けて要素を返す。
+   描画した内容を覚えておき、並び順の変更時は再検索せずに並び替えだけ行う */
+function renderItems(items, p, tab) {
+  const sorted = sortItems(tab, items);
   const kind = items[0].type;
-  if (kind === 'audio') return renderAudioList(items, p);
-  if (kind === 'video') return renderVideoGrid(items, p);
-  return renderImageGrid(items, p);
+  const el = kind === 'audio' ? renderAudioList(sorted, p)
+           : kind === 'video' ? renderVideoGrid(sorted, p)
+           :                    renderImageGrid(sorted, p);
+  state[tab].rendered = { items, p, el };
+  return el;
+}
+
+/* 並び順の変更: 最後に描画した一覧をその場で並び替えて差し替える */
+function resortResults(tab) {
+  const r = state[tab].rendered;
+  if (r && r.el.isConnected) r.el.replaceWith(renderItems(r.items, r.p, tab));
+  else runSearch(tab);
 }
 
 /* ===== 描画: 待機状態 ===== */
