@@ -118,6 +118,13 @@ a{color:inherit}
 .panel-title{display:flex;align-items:center;gap:10px;font-size:21px;font-weight:700}
 .panel-title i{color:var(--primary)}
 .panel-sub{font-size:13px;color:var(--txt3);margin-top:6px;line-height:1.7}
+/* 使い方の案内 (オーディオタブ、マウス環境のみ) */
+.panel-usage{
+  display:inline-flex;align-items:center;gap:6px;
+  margin-top:8px;padding:4px 12px;border-radius:999px;
+  background:var(--bg2);font-size:12px;color:var(--txt3);
+}
+.panel-usage i{font-size:14px}
 
 /* ===== 検索バー ===== */
 .search-bar{
@@ -419,7 +426,7 @@ a{color:inherit}
   <button class="audio-play" id="player-toggle" type="button" aria-label="再生 / 一時停止"><i class="ti ti-player-play" aria-hidden="true"></i></button>
   <div class="player-info audio-info">
     <div class="audio-title" id="player-title">再生していません</div>
-    <div class="audio-author" id="player-author">一覧の再生アイコンから試聴できます</div>
+    <div class="audio-author" id="player-author"></div>
   </div>
   <input class="player-seek" id="player-seek" type="range" min="0" max="1000" value="0" aria-label="シークバー">
   <span class="player-time" id="player-time">0:00 / 0:00</span>
@@ -491,6 +498,9 @@ function buildPanel(tab) {
       <div class="panel-hdr">
         <h1 class="panel-title"><i class="ti ti-${t.icon}" aria-hidden="true"></i> ${t.label}</h1>
         <p class="panel-sub">${t.sub}</p>
+        ${(tab === 'bgm' || tab === 'se') && HOVER_PLAY
+          ? `<p class="panel-usage"><i class="ti ti-info-circle" aria-hidden="true"></i> 再生・停止はボタンから / 再生中はホバーで切りかえ</p>`
+          : ''}
       </div>
       <form class="search-bar" data-search="${tab}">
         <i class="ti ti-search lead" aria-hidden="true"></i>
@@ -805,13 +815,13 @@ function renderAudioList(items, p) {
     row.querySelector('.audio-duration').textContent = formatDuration(it.duration);
     const open = row.querySelector('.asset-open');
     if (it.pageUrl) open.href = it.pageUrl; else open.remove();
-    /* マウス環境ではアイコンにホバーするだけで再生を開始する。
-       ホバーでは停止・一時停止は行わず (再生中の行では何もしない)、
-       切り替えはクリックで行う。タッチ環境 (ホバー不可) はタップで切り替える */
+    /* 再生・停止はボタンのクリック (タップ) で行う。
+       マウス環境では、何かを再生中に別の曲のボタンへホバーすると
+       その曲に切り替える (停止中・一時停止中のホバーでは何もしない) */
     const playBtn = row.querySelector('.audio-play');
     if (HOVER_PLAY) {
       playBtn.addEventListener('mouseenter', () => {
-        if (playingRow === row && !audio.paused) return;
+        if (audio.paused || playingRow === row) return;
         playAudio(it, row);
       });
     }
@@ -891,6 +901,11 @@ let playingRow = null;
 /* ホバーできる環境か (再生アイコンのホバー切替に使う) */
 const HOVER_PLAY = matchMedia('(hover: hover)').matches;
 
+/* 再生バー待機時の案内文 (環境ごとの操作方法) */
+const IDLE_HINT = HOVER_PLAY
+  ? '再生・停止はボタンから / 再生中はホバーで切りかえ'
+  : '一覧の再生ボタンをタップして試聴できます';
+
 const player = {
   bar:    document.getElementById('player'),
   toggle: document.getElementById('player-toggle'),
@@ -900,6 +915,7 @@ const player = {
   time:   document.getElementById('player-time'),
   close:  document.getElementById('player-close'),
 };
+player.author.textContent = IDLE_HINT;
 
 function playAudio(it, row) {
   if (playingRow === row) { togglePause(); return; }
@@ -966,7 +982,7 @@ player.close.addEventListener('click', () => {
   audio.removeAttribute('src');
   setRowPlaying(null);
   player.title.textContent = '再生していません';
-  player.author.textContent = '一覧の再生アイコンから試聴できます';
+  player.author.textContent = IDLE_HINT;
   player.seek.value = 0;
   player.time.textContent = '0:00 / 0:00';
 });
