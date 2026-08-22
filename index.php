@@ -169,13 +169,9 @@ a{color:inherit}
 .provider-tab:hover{background:var(--bg2)}
 .provider-tab.active{background:var(--primary-dim);color:var(--primary);border-color:transparent;font-weight:600}
 .provider-tab i{font-size:16px}
-/* 登録件数バッジ (「すべて」はタブ内の合算値) */
-.provider-tab .cnt{
-  font-size:11px;font-weight:600;line-height:1;
-  background:var(--bg3);color:var(--txt3);
-  border-radius:999px;padding:3px 8px;
-}
-.provider-tab.active .cnt{background:var(--primary);color:#fff}
+/* 登録件数 (「すべて」はタブ内の合算値) */
+.provider-tab .cnt{font-size:11px;font-weight:600;color:var(--txt3)}
+.provider-tab.active .cnt{color:var(--primary)}
 
 /* ===== 結果: 画像 / 動画グリッド ===== */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
