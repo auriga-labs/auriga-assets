@@ -805,11 +805,17 @@ function renderAudioList(items, p) {
     row.querySelector('.audio-duration').textContent = formatDuration(it.duration);
     const open = row.querySelector('.asset-open');
     if (it.pageUrl) open.href = it.pageUrl; else open.remove();
-    /* マウス環境ではアイコンにホバーするだけで再生/一時停止を切り替える。
-       タッチ環境 (ホバー不可) はこれまで通りタップで切り替える */
+    /* マウス環境ではアイコンにホバーするだけで再生を開始する。
+       ホバーでは停止・一時停止は行わず (再生中の行では何もしない)、
+       切り替えはクリックで行う。タッチ環境 (ホバー不可) はタップで切り替える */
     const playBtn = row.querySelector('.audio-play');
-    if (HOVER_PLAY) playBtn.addEventListener('mouseenter', () => playAudio(it, row));
-    else            playBtn.addEventListener('click',      () => playAudio(it, row));
+    if (HOVER_PLAY) {
+      playBtn.addEventListener('mouseenter', () => {
+        if (playingRow === row && !audio.paused) return;
+        playAudio(it, row);
+      });
+    }
+    playBtn.addEventListener('click', () => playAudio(it, row));
     /* 再生ボタン・リンク以外のカード全体クリックで情報モーダルを開く */
     row.addEventListener('click', e => {
       if (e.target.closest('button, a')) return;
