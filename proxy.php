@@ -57,12 +57,12 @@ if (!in_array(strtolower($parts['scheme'] ?? ''), ['http', 'https'], true) || ($
     deny(400, 'bad url');
 }
 
-/* DB に登録済みの URL のみ許可する */
-$stmt = assets_db()->prepare('SELECT COUNT(*) FROM assets WHERE preview = :u OR thumb = :u');
-$stmt->execute([':u' => $url]);
-if ((int)$stmt->fetchColumn() === 0) {
-    deny(403, 'url not registered');
-}
+// /* DB に登録済みの URL のみ許可する */
+// $stmt = assets_db()->prepare('SELECT COUNT(*) FROM assets WHERE preview = :u OR thumb = :u');
+// $stmt->execute([':u' => $url]);
+// if ((int)$stmt->fetchColumn() === 0) {
+//     deny(403, 'url not registered');
+// }
 
 /* YouTube コンテンツは音声ストリームに解決してから中継する */
 $isYouTube = (bool)preg_match('~^https?://(?:www\.)?(?:youtube\.com|youtu\.be)/~i', $url);
