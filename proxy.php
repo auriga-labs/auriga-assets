@@ -44,7 +44,7 @@ function youtube_audio_url(string $watchUrl, bool $refresh = false): string
        ため、nsig 解決の JS ランタイムには JIT 不要の QuickJS-NG を使う */
     $qjs = __DIR__ . '/qjs';
     $out = (string)shell_exec(
-        'yt-dlp --js-runtimes ' . escapeshellarg('quickjs:' . $qjs)
+        'yt-dlp --cookies /home/toki1703/.config/yt-dlp/cookies.txt --js-runtimes ' . escapeshellarg('quickjs:' . $qjs)
         . ' --force-ipv4 -g -f "ba[ext=m4a]/ba" ' . escapeshellarg($watchUrl) . ' 2>&1'
     );
     foreach (preg_split('/\R/', $out) as $line) {
