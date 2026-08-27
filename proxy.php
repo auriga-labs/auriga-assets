@@ -51,7 +51,7 @@ function youtube_audio_url(string $watchUrl, bool $refresh = false): string
     deny(502, 'yt-dlp failed: ' . substr($out, 0, 300));
 }
 
-$url   = $_GET['url'] ?? '';
+$url = $_GET['url'] ?? $argv[1] ?? '';
 $parts = parse_url($url);
 if (!in_array(strtolower($parts['scheme'] ?? ''), ['http', 'https'], true) || ($parts['host'] ?? '') === '') {
     deny(400, 'bad url');
