@@ -20,6 +20,35 @@ function deny(int $status, string $msg): never
     exit;
 }
 
+/* 音声ストリーム直リンクの expire (UNIX 秒) がまだ先か */
+function stream_url_fresh(string $u): bool
+{
+    parse_str((string)parse_url($u, PHP_URL_QUERY), $q);
+    return (int)($q['expire'] ?? 0) > time() + 60;
+}
+
+/* YouTube の watch URL は HTML ページなのでそのままでは中継できない。
+   yt-dlp -g -f ba (bestaudio) で音声ストリームの直リンクに解決する。
+   直リンクは expire 付きで数時間有効なので data/ にキャッシュし、
+   シークの Range リクエストのたびに yt-dlp を起動しないようにする */
+function youtube_audio_url(string $watchUrl): string
+{
+    $cache = __DIR__ . '/data/yt-' . md5($watchUrl) . '.url';
+    if (is_file($cache)) {
+        $hit = trim((string)file_get_contents($cache));
+        if ($hit !== '' && stream_url_fresh($hit)) return $hit;
+    }
+    $out = (string)shell_exec('yt-dlp -g -f "ba[ext=m4a]/ba" ' . escapeshellarg($watchUrl) . ' 2>&1');
+    foreach (preg_split('/\R/', $out) as $line) {
+        $line = trim($line);
+        if (preg_match('~^https?://~', $line)) {
+            @file_put_contents($cache, $line);
+            return $line;
+        }
+    }
+    deny(502, 'yt-dlp failed: ' . substr($out, 0, 300));
+}
+
 $url   = $_GET['url'] ?? '';
 $parts = parse_url($url);
 if (!in_array(strtolower($parts['scheme'] ?? ''), ['http', 'https'], true) || ($parts['host'] ?? '') === '') {
@@ -31,6 +60,12 @@ $stmt = assets_db()->prepare('SELECT COUNT(*) FROM assets WHERE preview = :u OR 
 $stmt->execute([':u' => $url]);
 if ((int)$stmt->fetchColumn() === 0) {
     deny(403, 'url not registered');
+}
+
+/* YouTube コンテンツは音声ストリームに解決してから中継する */
+if (preg_match('~^https?://(?:www\.)?(?:youtube\.com|youtu\.be)/~i', $url)) {
+    $url   = youtube_audio_url($url);
+    $parts = parse_url($url);
 }
 
 set_time_limit(0);

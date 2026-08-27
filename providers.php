@@ -23,6 +23,8 @@ return [
     'se' => [
         ['id' => 'freesound', 'label' => 'Freesound', 'mode' => 'api',
          'keyName' => 'freesound', 'keyUrl' => 'https://freesound.org/apiv2/apply/', 'site' => 'freesound.org'],
+        ['id' => 'dova-se',   'label' => 'DOVA-SYNDROME', 'mode' => 'link',
+         'searchUrl' => 'https://www.google.com/search?q=site:dova-s.jp+{q}'],
         ['id' => 'selab',     'label' => '効果音ラボ',  'mode' => 'link',
          'searchUrl' => 'https://www.google.com/search?q=site:soundeffect-lab.info+{q}'],
         ['id' => 'otologic',  'label' => 'OtoLogic',  'mode' => 'link',

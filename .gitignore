@@ -1,2 +1,5 @@
 uploads
 *.py
+*.db-journal
+__pycache__
+data/yt-*.url
