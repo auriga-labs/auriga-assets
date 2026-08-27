@@ -40,7 +40,13 @@ function youtube_audio_url(string $watchUrl, bool $refresh = false): string
         $hit = trim((string)file_get_contents($cache));
         if ($hit !== '' && stream_url_fresh($hit)) return $hit;
     }
-    $out = (string)shell_exec('yt-dlp --force-ipv4 -g -f "ba[ext=m4a]/ba" ' . escapeshellarg($watchUrl) . ' 2>&1');
+    /* 共有ホスティングでは V8 (Deno) が JIT 用メモリを予約できず起動に失敗する
+       ため、nsig 解決の JS ランタイムには JIT 不要の QuickJS-NG を使う */
+    $qjs = __DIR__ . '/qjs';
+    $out = (string)shell_exec(
+        'yt-dlp --js-runtimes ' . escapeshellarg('quickjs:' . $qjs)
+        . ' --force-ipv4 -g -f "ba[ext=m4a]/ba" ' . escapeshellarg($watchUrl) . ' 2>&1'
+    );
     foreach (preg_split('/\R/', $out) as $line) {
         $line = trim($line);
         if (preg_match('~^https?://~', $line)) {
