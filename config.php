@@ -22,5 +22,5 @@ return [
        DSub / Symfonium などのクライアントからこのユーザー名とパスワードで接続する。
        パスワードが空のままだと Subsonic API は無効になる。 */
     'subsonic_user' => 'auriga',
-    'subsonic_pass' => 'Toki180918',
+    'subsonic_pass' => 'p=Toki180918',
 ];
