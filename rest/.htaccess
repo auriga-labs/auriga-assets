@@ -1,0 +1,4 @@
+# Subsonic 互換 API: /rest/<メソッド>.view をすべて index.php に集約する
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule . index.php [L,QSA]

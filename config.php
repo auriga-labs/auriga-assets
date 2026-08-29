@@ -17,4 +17,10 @@ return [
 
     /* https://freesound.org/apiv2/apply/ (API token、効果音) */
     'freesound' => '',
+
+    /* Subsonic 互換 API (rest/) のログイン情報。
+       DSub / Symfonium などのクライアントからこのユーザー名とパスワードで接続する。
+       パスワードが空のままだと Subsonic API は無効になる。 */
+    'subsonic_user' => 'auriga',
+    'subsonic_pass' => 'Toki180918',
 ];

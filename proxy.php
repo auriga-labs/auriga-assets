@@ -10,7 +10,7 @@
    preview / thumb に登録済みの URL だけを中継する。
    Range リクエストを転送するので再生バーのシークも効く。 */
 
-require __DIR__ . '/db.php';
+require_once __DIR__ . '/db.php';
 
 function deny(int $status, string $msg): never
 {
