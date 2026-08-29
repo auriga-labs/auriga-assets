@@ -113,6 +113,10 @@ case 'local': {
             'preview'  => $row['preview'],
             'duration' => $row['duration'],
             'pageUrl'  => $row['page_url'] !== '' ? $row['page_url'] : $row['preview'],
+            'trackTotal'  => (int)($row['track_total'] ?? 0),
+            'ncId'        => $row['nc_id'] ?? '',
+            'commonsUrl'  => $row['commons_url'] ?? '',
+            'downloadUrl' => $row['download_url'] ?? '',
         ];
     }
     break;

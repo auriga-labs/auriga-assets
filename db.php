@@ -32,16 +32,27 @@ function assets_db(): PDO
             preview    TEXT    NOT NULL DEFAULT "",  -- 素材本体 (uploads/... または URL)
             page_url   TEXT    NOT NULL DEFAULT "",  -- 配布元ページ (任意)
             duration   REAL    NOT NULL DEFAULT 0,   -- 秒 (音声・動画のみ)
+            track_total  INTEGER NOT NULL DEFAULT 0,  -- 同一作品の総トラック数 (DOVA の Tracks n/m の m)
+            nc_id        TEXT    NOT NULL DEFAULT "", -- ニコニコモンズ親作品ID (例: nc419769)
+            commons_url  TEXT    NOT NULL DEFAULT "", -- ニコニコモンズ URL (https://commons.nicovideo.jp/material/nc*)
+            download_url TEXT    NOT NULL DEFAULT "", -- 配布元ダウンロードページ (例: https://dova-s.jp/se/detail/1501/download)
             created_at INTEGER NOT NULL
         )');
 
     /* 旧スキーマからのマイグレーション (足りない列を追加する) */
     $cols = array_column($db->query('PRAGMA table_info(assets)')->fetchAll(), 'name');
-    if (!in_array('provider', $cols, true)) {
-        $db->exec('ALTER TABLE assets ADD COLUMN provider TEXT NOT NULL DEFAULT ""');
-    }
-    if (!in_array('description', $cols, true)) {
-        $db->exec('ALTER TABLE assets ADD COLUMN description TEXT NOT NULL DEFAULT ""');
+    $add  = [
+        'provider'     => 'TEXT NOT NULL DEFAULT ""',
+        'description'  => 'TEXT NOT NULL DEFAULT ""',
+        'track_total'  => 'INTEGER NOT NULL DEFAULT 0',
+        'nc_id'        => 'TEXT NOT NULL DEFAULT ""',
+        'commons_url'  => 'TEXT NOT NULL DEFAULT ""',
+        'download_url' => 'TEXT NOT NULL DEFAULT ""',
+    ];
+    foreach ($add as $name => $def) {
+        if (!in_array($name, $cols, true)) {
+            $db->exec("ALTER TABLE assets ADD COLUMN {$name} {$def}");
+        }
     }
     return $db;
 }
