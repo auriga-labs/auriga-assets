@@ -188,6 +188,18 @@ a{color:inherit}
 }
 .sort-select:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-dim)}
 
+/* ===== 結果の件数・所要時間 (例: 19,152 件 (うち 50 件を表示) · 12 ms) ===== */
+.result-meta{
+  display:flex;align-items:center;gap:6px;
+  margin:0 2px 12px;font-size:12px;color:var(--txt3);
+}
+.result-meta i{font-size:14px}
+.result-meta .ms{opacity:.75}
+
+/* 一覧末尾の追加読み込みインジケーター (画面に入ると次のページを取りに行く) */
+.pager{justify-content:center;padding:20px 2px}
+.pager.is-error{cursor:pointer;color:var(--txt2)}
+
 /* ===== 結果: 画像 / 動画グリッド ===== */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
 
@@ -519,11 +531,16 @@ const TABS = {
 };
 
 /* タブごとの状態: 選択中プロバイダー / 最後に検索した語 / 並び順 /
-   最後に描画した結果 (並び替え時の再描画に使う) */
+   最後に描画した結果 (並び替え時の再描画に使う) /
+   追加読み込みの状態 (pager: 未取得のページが無くなると null) */
 const state = {};
 for (const tab of Object.keys(TABS)) {
-  state[tab] = { provider: ALL_PROVIDER.id, query: '', sort: 'date-new', rendered: null };
+  state[tab] = { provider: ALL_PROVIDER.id, query: '', sort: 'date-new',
+                 rendered: null, pager: null, meta: null };
 }
+
+/* ローカル DB から一度に取得する件数 (スクロールでこの単位ずつ追加読み込みする) */
+const PAGE_SIZE = 50;
 
 /* 並び順の選択肢 (画像タブには出さない。投稿日時・再生時間で並び替える)
    デフォルトは投稿日時の降順 (年月が同じなら名前順) */
@@ -568,14 +585,28 @@ function buildPanel(tab) {
             `<option value="${v}"${v === state[tab].sort ? ' selected' : ''}>${label}</option>`).join('')}
         </select>
       </div>` : ''}
+      <div class="result-meta" id="meta-${tab}" hidden>
+        <i class="ti ti-database" aria-hidden="true"></i><span class="count"></span><span class="ms"></span>
+      </div>
       <div class="results" id="results-${tab}"></div>
     </div>`;
 
-  /* 検索フォーム */
+  /* 検索フォーム: 入力のたびに自動で検索する (打ち終わりを待つデバウンス付き)。
+     日本語入力は変換中に検索しても意味が無いので、確定してから走らせる */
+  const input = panel.querySelector('input');
+  let composing = false;
+  input.addEventListener('compositionstart', () => { composing = true; });
+  input.addEventListener('compositionend', () => {
+    composing = false;
+    queueSearch(tab, input.value.trim());
+  });
+  input.addEventListener('input', () => {
+    if (!composing) queueSearch(tab, input.value.trim());
+  });
+  /* 検索ボタン / Enter は待たずにその場で検索する */
   panel.querySelector('form').addEventListener('submit', e => {
     e.preventDefault();
-    state[tab].query = panel.querySelector('input').value.trim();
-    runSearch(tab);
+    queueSearch(tab, input.value.trim(), 0);
   });
 
   /* プロバイダーピル */
@@ -605,6 +636,40 @@ function provider(tab) {
   return PROVIDERS[tab].find(p => p.id === state[tab].provider);
 }
 
+/* ===== 逐次検索 =====
+   キー入力のたびに検索するが、1 文字ごとに投げると DB を無駄に叩くので
+   入力が止まってから走らせる。同じ語での再検索は行わない */
+const SEARCH_DEBOUNCE_MS = 300;
+const searchTimers = {};
+
+function queueSearch(tab, q, delay = SEARCH_DEBOUNCE_MS) {
+  clearTimeout(searchTimers[tab]);
+  if (q === state[tab].query) return;
+  searchTimers[tab] = setTimeout(() => {
+    state[tab].query = q;
+    runSearch(tab);
+  }, delay);
+}
+
+/* ===== ローカル DB の取得 (ページ単位) =====
+   並び替えは api.php 側で DB 全件に対して行う。クライアントで並べ替えても
+   取得済みのページ内でしか効かないため、並び順は必ずサーバーに渡す */
+function localUrl(tab, p, q, offset) {
+  const target = p.id === ALL_PROVIDER.id ? '' : p.id;
+  return `api.php?provider=local&kind=${tab}&target=${encodeURIComponent(target)}` +
+         `&q=${encodeURIComponent(q)}&sort=${encodeURIComponent(state[tab].sort)}` +
+         `&offset=${offset}&limit=${PAGE_SIZE}`;
+}
+
+async function fetchLocal(tab, p, q, offset) {
+  const res  = await fetch(localUrl(tab, p, q, offset));
+  const data = await res.json();
+  const items = data.items ?? [];
+  for (const it of items) it._src = PROVIDER_LABELS[it.provider] ?? p.label;
+  return { items, total: data.total ?? items.length, offset: data.offset ?? offset,
+           limit: data.limit ?? PAGE_SIZE, hasMore: data.hasMore ?? false };
+}
+
 /* ===== 検索実行 =====
    どのプロバイダーを選んでいても、まずローカル DB からそのプロバイダーに
    割り当てた素材を取得して一覧の先頭に描画する。API 型はさらにオンライン
@@ -614,24 +679,34 @@ async function runSearch(tab) {
   const q = state[tab].query;
   const box = document.getElementById('results-' + tab);
   const stale = () => state[tab].provider !== p.id || state[tab].query !== q;
+  const t0 = performance.now();
 
+  stopPager(tab);
+  setResultMeta(tab, null);
   box.replaceChildren(placeholderMessage('loader-2 spin', '検索中…'));
 
-  let localItems = [];
+  /* 結果を差し替え、件数表示を更新し、未取得のローカル素材があれば
+     一覧末尾に追加読み込みを仕掛ける */
+  const show = (node, local, extra = 0) => {
+    box.replaceChildren(node);
+    setResultMeta(tab, { total: local.total + extra, shown: local.items.length + extra,
+                         ms: Math.round(performance.now() - t0) });
+    startPager(tab, box, p, q, local);
+  };
+
+  let local = { items: [], total: 0, offset: 0, limit: PAGE_SIZE, hasMore: false };
   try {
-    const target = p.id === ALL_PROVIDER.id ? '' : p.id;
-    const res = await fetch(`api.php?provider=local&kind=${tab}&target=${encodeURIComponent(target)}&q=${encodeURIComponent(q)}`);
-    localItems = (await res.json()).items ?? [];
-    for (const it of localItems) it._src = PROVIDER_LABELS[it.provider] ?? p.label;
+    local = await fetchLocal(tab, p, q, 0);
   } catch (e) {
     console.error('ローカルDBの取得に失敗:', e);
   }
   if (stale()) return;
+  const localItems = local.items;
 
   /* すべて: ローカル DB 全件 + API 対応プロバイダーを横断検索して結合する */
   if (p.id === ALL_PROVIDER.id) {
     if (q === '') {
-      if (localItems.length > 0) box.replaceChildren(renderItems(localItems, p, tab));
+      if (localItems.length > 0) show(renderItems(localItems, p, tab), local);
       else renderIdle(tab);
       return;
     }
@@ -645,12 +720,13 @@ async function runSearch(tab) {
       } catch { return []; }
     }));
     if (stale()) return;
-    const items = [...localItems, ...results.flat()];
+    const apiItems = results.flat();
+    const items = [...localItems, ...apiItems];
     if (items.length === 0) {
       box.replaceChildren(placeholderMessage('zoom-question', `「${q}」に一致する素材が見つかりませんでした`));
       return;
     }
-    box.replaceChildren(renderItems(items, p, tab));
+    show(renderItems(items, p, tab), local, apiItems.length);
     return;
   }
 
@@ -677,13 +753,13 @@ async function runSearch(tab) {
     } else {
       frag.append(placeholderMessage('zoom-question', `登録済み素材に「${q}」は見つかりませんでした`));
     }
-    box.replaceChildren(frag);
+    show(frag, local);
     return;
   }
 
   /* API 型: キーワード空なら登録済み素材のみ表示する */
   if (q === '') {
-    if (localItems.length > 0) box.replaceChildren(renderItems(localItems, p, tab));
+    if (localItems.length > 0) show(renderItems(localItems, p, tab), local);
     else renderIdle(tab);
     return;
   }
@@ -711,14 +787,15 @@ async function runSearch(tab) {
     if (localItems.length > 0) {
       const frag = document.createDocumentFragment();
       frag.append(renderItems(localItems, p, tab), notice);
-      box.replaceChildren(frag);
+      show(frag, local);
     } else {
       box.replaceChildren(notice);
     }
     return;
   }
 
-  const items = [...localItems, ...(data.error ? [] : (data.items ?? []))];
+  const apiItems = data.error ? [] : (data.items ?? []);
+  const items = [...localItems, ...apiItems];
   if (data.error && items.length === 0) {
     box.replaceChildren(placeholderMessage('alert-circle', `検索に失敗しました (${data.error})`));
     return;
@@ -727,7 +804,96 @@ async function runSearch(tab) {
     box.replaceChildren(placeholderMessage('zoom-question', `「${q}」に一致する素材が見つかりませんでした`));
     return;
   }
-  box.replaceChildren(renderItems(items, p, tab));
+  show(renderItems(items, p, tab), local, apiItems.length);
+}
+
+/* ===== 件数・所要時間の表示 (n 件 (うち m 件を表示) · t ms) =====
+   n はローカル DB のヒット総数 + オンライン検索の取得件数、
+   m はいま画面に出ている件数。追加読み込みのたびに m と t を更新する */
+function setResultMeta(tab, info) {
+  const el = document.getElementById('meta-' + tab);
+  state[tab].meta = info;
+  if (!el) return;
+  el.hidden = !info;
+  if (!info) return;
+  const n = info.total.toLocaleString('ja-JP');
+  const m = info.shown.toLocaleString('ja-JP');
+  el.querySelector('.count').textContent =
+    info.shown >= info.total ? `${n} 件` : `${n} 件 (うち ${m} 件を表示)`;
+  el.querySelector('.ms').textContent = ` · ${info.ms} ms`;
+}
+
+/* ===== スクロールでの追加読み込み =====
+   一覧の末尾にインジケーターを置き、パネルのスクロールでそれが近づいたら
+   ローカル DB の次のページを取得して後ろに足す。並び順はサーバー側で
+   全件に対して確定しているので、ページをまたいでも並びは崩れない */
+function stopPager(tab) {
+  const pg = state[tab].pager;
+  if (pg) { pg.observer.disconnect(); pg.sentinel.remove(); }
+  state[tab].pager = null;
+}
+
+function startPager(tab, box, p, q, local) {
+  stopPager(tab);
+  if (!local.hasMore) return;
+  const sentinel = document.createElement('p');
+  sentinel.className = 'placeholder pager';
+  sentinel.innerHTML = '<i class="ti ti-loader-2 spin" aria-hidden="true"></i> <span></span>';
+  sentinel.addEventListener('click', () => loadNextPage(tab));   /* 失敗時の再試行 */
+  box.append(sentinel);
+
+  /* スクロールするのはタブのパネル。少し手前 (400px) で読み始める */
+  const observer = new IntersectionObserver(
+    entries => { if (entries.some(e => e.isIntersecting)) loadNextPage(tab); },
+    { root: document.getElementById('panel-' + tab), rootMargin: '400px' });
+  state[tab].pager = { p, q, offset: local.offset + local.limit, loading: false, sentinel, observer };
+  setPagerText(tab);
+  observer.observe(sentinel);
+}
+
+function setPagerText(tab, text = null) {
+  const pg = state[tab].pager;
+  if (!pg) return;
+  const meta = state[tab].meta;
+  pg.sentinel.classList.toggle('is-error', text !== null);
+  pg.sentinel.querySelector('span').textContent =
+    text ?? (meta ? `読み込み中… (${meta.shown.toLocaleString('ja-JP')} / ${meta.total.toLocaleString('ja-JP')} 件)`
+                  : '読み込み中…');
+}
+
+async function loadNextPage(tab) {
+  const pg = state[tab].pager;
+  if (!pg || pg.loading) return;
+  pg.loading = true;
+  setPagerText(tab);
+  const t0 = performance.now();
+
+  let local;
+  try {
+    local = await fetchLocal(tab, pg.p, pg.q, pg.offset);
+  } catch (e) {
+    console.error('追加読み込みに失敗:', e);
+    pg.loading = false;
+    setPagerText(tab, '追加の読み込みに失敗しました (クリックで再試行)');
+    return;
+  }
+  if (state[tab].pager !== pg) return;   /* 読み込み中に検索条件が変わった */
+
+  appendItems(tab, local.items);
+  const meta = state[tab].meta;
+  setResultMeta(tab, { total: meta ? meta.total : local.total,
+                       shown: (meta ? meta.shown : 0) + local.items.length,
+                       ms: Math.round(performance.now() - t0) });
+
+  /* 取得位置は返却件数ではなく DB 上の窓で進める
+     (サムネイルも本体も無い行は api.php 側で除かれるため) */
+  pg.offset = local.offset + local.limit;
+  if (!local.hasMore) { stopPager(tab); return; }
+  pg.loading = false;
+  setPagerText(tab);
+  /* 追加後もインジケーターが画面内に残っている場合、監視し直して次を読む */
+  pg.observer.unobserve(pg.sentinel);
+  pg.observer.observe(pg.sentinel);
 }
 
 /* ===== 並び替え =====
@@ -763,23 +929,46 @@ function sortItems(tab, items) {
   });
 }
 
+/* 種別ごとの一覧コンテナと 1 件分の要素。
+   追加読み込みでは同じコンテナに同じ要素を足していく */
+const RENDERERS = {
+  image: { cls: 'grid',       item: imageCard },
+  video: { cls: 'grid',       item: videoCard },
+  audio: { cls: 'audio-list', item: audioRow },
+};
+
 /* 種別に応じたレンダラーへ振り分けて要素を返す。
-   描画した内容を覚えておき、並び順の変更時は再検索せずに並び替えだけ行う */
+   描画した内容を覚えておき、追加読み込みと並び替えの再描画に使う */
 function renderItems(items, p, tab) {
-  const sorted = sortItems(tab, items);
   const kind = items[0].type;
-  const el = kind === 'audio' ? renderAudioList(sorted, p)
-           : kind === 'video' ? renderVideoGrid(sorted, p)
-           :                    renderImageGrid(sorted, p);
-  state[tab].rendered = { items, p, el };
+  const r = RENDERERS[kind] ?? RENDERERS.image;
+  const el = document.createElement('div');
+  el.className = r.cls;
+  /* ローカル素材だけの一覧は api.php が DB 全件を並べ替えて返しているので
+     ここでは並べ直さない (追加読み込みしたページとの並びを揃えるため)。
+     オンライン検索の結果が混ざるときだけクライアント側で並べる */
+  const sorted = items.every(it => it.local) ? items : sortItems(tab, items);
+  for (const it of sorted) el.append(r.item(it, p));
+  state[tab].rendered = { items: [...items], p, kind, el };
   return el;
 }
 
-/* 並び順の変更: 最後に描画した一覧をその場で並び替えて差し替える */
+/* 追加読み込み: 取得済みの一覧の後ろに次のページを足す
+   (並び順はサーバー側で確定済みなので、ここでは並べ直さない) */
+function appendItems(tab, items) {
+  const rendered = state[tab].rendered;
+  if (!rendered) return;
+  const r = RENDERERS[rendered.kind] ?? RENDERERS.image;
+  for (const it of items) rendered.el.append(r.item(it, rendered.p));
+  rendered.items.push(...items);
+}
+
+/* 並び順の変更: 未取得のページが残っているときは DB 全件を並べ直す必要があるので
+   検索からやり直す。全件取得済みならその場で並び替えて差し替えるだけで済む */
 function resortResults(tab) {
   const r = state[tab].rendered;
-  if (r && r.el.isConnected) r.el.replaceWith(renderItems(r.items, r.p, tab));
-  else runSearch(tab);
+  if (state[tab].pager || !r || !r.el.isConnected) { runSearch(tab); return; }
+  r.el.replaceWith(renderItems(r.items, r.p, tab));
 }
 
 /* ===== 描画: 待機状態 ===== */
@@ -826,119 +1015,104 @@ function sourceLabel(it, p) {
   return it._src ?? p.label;
 }
 
-/* ===== 描画: 画像グリッド ===== */
-function renderImageGrid(items, p) {
-  const grid = document.createElement('div');
-  grid.className = 'grid';
-  for (const it of items) {
-    const a = document.createElement('a');
-    a.className = 'asset-card';
-    a.href = it.pageUrl || it.full;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.innerHTML = `
-      <div class="asset-thumb"><img loading="lazy" alt=""></div>
-      <div class="asset-meta">
-        <div class="info"><h3></h3><p></p></div>
-        <span class="asset-open"><i class="ti ti-external-link" aria-hidden="true"></i></span>
-      </div>`;
-    a.querySelector('img').src = it.thumb;
-    a.querySelector('h3').textContent = it.title || p.label;
-    a.querySelector('p').textContent = it.author ? `by ${it.author} · ${sourceLabel(it, p)}` : sourceLabel(it, p);
-    grid.append(a);
-  }
-  return grid;
+/* ===== 描画: 画像カード ===== */
+function imageCard(it, p) {
+  const a = document.createElement('a');
+  a.className = 'asset-card';
+  a.href = it.pageUrl || it.full;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.innerHTML = `
+    <div class="asset-thumb"><img loading="lazy" alt=""></div>
+    <div class="asset-meta">
+      <div class="info"><h3></h3><p></p></div>
+      <span class="asset-open"><i class="ti ti-external-link" aria-hidden="true"></i></span>
+    </div>`;
+  a.querySelector('img').src = it.thumb;
+  a.querySelector('h3').textContent = it.title || p.label;
+  a.querySelector('p').textContent = it.author ? `by ${it.author} · ${sourceLabel(it, p)}` : sourceLabel(it, p);
+  return a;
 }
 
-/* ===== 描画: 動画グリッド (クリックでインライン再生) ===== */
-function renderVideoGrid(items, p) {
-  const grid = document.createElement('div');
-  grid.className = 'grid';
-  for (const it of items) {
-    const card = document.createElement('div');
-    card.className = 'asset-card';
-    card.innerHTML = `
-      <div class="asset-thumb wide">
-        <img loading="lazy" alt="">
-        <span class="play-badge"><i class="ti ti-player-play" aria-hidden="true"></i></span>
-        <span class="duration"></span>
-      </div>
-      <div class="asset-meta">
-        <div class="info"><h3></h3><p></p></div>
-        <a class="asset-open" target="_blank" rel="noopener" title="配布ページを開く"><i class="ti ti-external-link" aria-hidden="true"></i></a>
-      </div>`;
-    card.querySelector('img').src = it.thumb;
-    card.querySelector('.duration').textContent = formatDuration(it.duration);
-    card.querySelector('h3').textContent = it.title || p.label;
-    card.querySelector('p').textContent = it.author ? `by ${it.author} · ${sourceLabel(it, p)}` : sourceLabel(it, p);
-    const open = card.querySelector('.asset-open');
-    if (it.pageUrl) open.href = it.pageUrl; else open.remove();
+/* ===== 描画: 動画カード (クリックでインライン再生) ===== */
+function videoCard(it, p) {
+  const card = document.createElement('div');
+  card.className = 'asset-card';
+  card.innerHTML = `
+    <div class="asset-thumb wide">
+      <img loading="lazy" alt="">
+      <span class="play-badge"><i class="ti ti-player-play" aria-hidden="true"></i></span>
+      <span class="duration"></span>
+    </div>
+    <div class="asset-meta">
+      <div class="info"><h3></h3><p></p></div>
+      <a class="asset-open" target="_blank" rel="noopener" title="配布ページを開く"><i class="ti ti-external-link" aria-hidden="true"></i></a>
+    </div>`;
+  card.querySelector('img').src = it.thumb;
+  card.querySelector('.duration').textContent = formatDuration(it.duration);
+  card.querySelector('h3').textContent = it.title || p.label;
+  card.querySelector('p').textContent = it.author ? `by ${it.author} · ${sourceLabel(it, p)}` : sourceLabel(it, p);
+  const open = card.querySelector('.asset-open');
+  if (it.pageUrl) open.href = it.pageUrl; else open.remove();
 
-    /* サムネイルクリックでインライン再生に差し替える */
-    const thumb = card.querySelector('.asset-thumb');
-    thumb.addEventListener('click', () => {
-      if (!it.preview) { window.open(it.pageUrl, '_blank', 'noopener'); return; }
-      const video = document.createElement('video');
-      video.src = mediaUrl(it);
-      video.controls = true;
-      video.autoplay = true;
-      video.playsInline = true;
-      thumb.replaceChildren(video);
-    }, { once: true });
-    grid.append(card);
-  }
-  return grid;
+  /* サムネイルクリックでインライン再生に差し替える */
+  const thumb = card.querySelector('.asset-thumb');
+  thumb.addEventListener('click', () => {
+    if (!it.preview) { window.open(it.pageUrl, '_blank', 'noopener'); return; }
+    const video = document.createElement('video');
+    video.src = mediaUrl(it);
+    video.controls = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    thumb.replaceChildren(video);
+  }, { once: true });
+  return card;
 }
 
-/* ===== 描画: オーディオリスト ===== */
-function renderAudioList(items, p) {
-  const list = document.createElement('div');
-  list.className = 'audio-list';
-  for (const it of items) {
-    const row = document.createElement('div');
-    row.className = 'audio-row';
-    row.innerHTML = `
-      <button class="audio-play" type="button" aria-label="再生 / 一時停止"><i class="ti ti-player-play" aria-hidden="true"></i></button>
-      ${it.thumb ? '<img class="audio-thumb" loading="lazy" alt="">' : ''}
-      <div class="audio-info">
-        <div class="audio-title"></div>
-        <div class="audio-author"></div>
-      </div>
-      <span class="audio-duration"></span>
-      <a class="asset-open" target="_blank" rel="noopener" title="配布ページを開く"><i class="ti ti-external-link" aria-hidden="true"></i></a>`;
-    if (it.thumb) row.querySelector('.audio-thumb').src = it.thumb;
-    row.querySelector('.audio-title').textContent = it.title;
-    row.querySelector('.audio-author').textContent = it.author ? `${it.author} · ${sourceLabel(it, p)}` : sourceLabel(it, p);
-    /* 詳細の 1 行目 (例: 2019.09 | 幻想的 | ピアノ | 2分37秒/2.40 MB) を一覧にも表示する */
-    const descLine = (it.description ?? '').split('\n')[0];
-    if (descLine) {
-      const desc = document.createElement('div');
-      desc.className = 'audio-desc';
-      desc.textContent = descLine;
-      row.querySelector('.audio-info').append(desc);
-    }
-    row.querySelector('.audio-duration').textContent = formatDuration(it.duration);
-    const open = row.querySelector('.asset-open');
-    if (it.pageUrl) open.href = it.pageUrl; else open.remove();
-    /* 再生・停止はボタンのクリック (タップ) で行う。
-       マウス環境では、何かを再生中に別の曲のボタンへホバーすると
-       その曲に切り替える (停止中・一時停止中のホバーでは何もしない) */
-    const playBtn = row.querySelector('.audio-play');
-    if (HOVER_PLAY) {
-      playBtn.addEventListener('mouseenter', () => {
-        if (audio.paused || playingRow === row) return;
-        playAudio(it, row);
-      });
-    }
-    playBtn.addEventListener('click', () => playAudio(it, row));
-    /* 再生ボタン・リンク以外のカード全体クリックで情報モーダルを開く */
-    row.addEventListener('click', e => {
-      if (e.target.closest('button, a')) return;
-      openInfoModal(it, p, row);
+/* ===== 描画: オーディオ 1 行 ===== */
+function audioRow(it, p) {
+  const row = document.createElement('div');
+  row.className = 'audio-row';
+  row.innerHTML = `
+    <button class="audio-play" type="button" aria-label="再生 / 一時停止"><i class="ti ti-player-play" aria-hidden="true"></i></button>
+    ${it.thumb ? '<img class="audio-thumb" loading="lazy" alt="">' : ''}
+    <div class="audio-info">
+      <div class="audio-title"></div>
+      <div class="audio-author"></div>
+    </div>
+    <span class="audio-duration"></span>
+    <a class="asset-open" target="_blank" rel="noopener" title="配布ページを開く"><i class="ti ti-external-link" aria-hidden="true"></i></a>`;
+  if (it.thumb) row.querySelector('.audio-thumb').src = it.thumb;
+  row.querySelector('.audio-title').textContent = it.title;
+  row.querySelector('.audio-author').textContent = it.author ? `${it.author} · ${sourceLabel(it, p)}` : sourceLabel(it, p);
+  /* 詳細の 1 行目 (例: 2019.09 | 幻想的 | ピアノ | 2分37秒/2.40 MB) を一覧にも表示する */
+  const descLine = (it.description ?? '').split('\n')[0];
+  if (descLine) {
+    const desc = document.createElement('div');
+    desc.className = 'audio-desc';
+    desc.textContent = descLine;
+    row.querySelector('.audio-info').append(desc);
+  }
+  row.querySelector('.audio-duration').textContent = formatDuration(it.duration);
+  const open = row.querySelector('.asset-open');
+  if (it.pageUrl) open.href = it.pageUrl; else open.remove();
+  /* 再生・停止はボタンのクリック (タップ) で行う。
+     マウス環境では、何かを再生中に別の曲のボタンへホバーすると
+     その曲に切り替える (停止中・一時停止中のホバーでは何もしない) */
+  const playBtn = row.querySelector('.audio-play');
+  if (HOVER_PLAY) {
+    playBtn.addEventListener('mouseenter', () => {
+      if (audio.paused || playingRow === row) return;
+      playAudio(it, row);
     });
-    list.append(row);
   }
-  return list;
+  playBtn.addEventListener('click', () => playAudio(it, row));
+  /* 再生ボタン・リンク以外のカード全体クリックで情報モーダルを開く */
+  row.addEventListener('click', e => {
+    if (e.target.closest('button, a')) return;
+    openInfoModal(it, p, row);
+  });
+  return row;
 }
 
 /* ===== 情報モーダル (カード全体のクリックで表示) ===== */

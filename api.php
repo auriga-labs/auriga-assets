@@ -6,6 +6,10 @@
    GET api.php?provider=pixabay-image&q=猫
    → { "items": [ { type, title, author, thumb, full, preview, duration, pageUrl } ] }
 
+   provider=local はさらに offset / limit / sort を受け付け、
+   { "items": [...], "total": 全件数, "offset": .., "limit": .., "hasMore": bool }
+   を返す (index.php のスクロール追従の追加読み込みで使う)。
+
    type: image | video | audio
      image: thumb (一覧用) / full (原寸ページ用 URL)
      video: thumb + preview (mp4 直リンク、クリックでインライン再生)
@@ -75,16 +79,43 @@ function fetch_json(string $url, array $headers = []): array
 
 $eq = rawurlencode($q);
 
+/* items に添えて返す付加情報 (local のページング情報など) */
+$meta = [];
+
 switch ($provider) {
 
 case 'local': {
     /* ローカル素材 DB (SQLite)。kind=bgm|se|image|video と割り当て先プロバイダー
        (target=providers.php の id) で絞り込み、キーワードはタイトル・タグ・作者を
-       部分一致で検索する。空なら新着 50 件。結果は割り当て先プロバイダーの
-       一覧の先頭に描画される (local: true が目印) */
+       部分一致で検索する。結果は割り当て先プロバイダーの一覧の先頭に描画される
+       (local: true が目印)。
+       件数が多いので offset / limit で切り出し、index.php がスクロールに応じて
+       次のページを取りに来る。並び替えは DB 全件に対してここで行う
+       (ページごとにクライアント側で並べても全体の並び順にはならないため) */
     $kind   = $_GET['kind'] ?? '';
     $target = $_GET['target'] ?? '';   /* 空なら全プロバイダー横断 (「すべて」ピル用) */
+    $offset = max(0, (int)($_GET['offset'] ?? 0));
+    $limit  = min(100, max(1, (int)($_GET['limit'] ?? 50)));
     if (!in_array($kind, ASSET_KINDS, true)) fail('bad_kind', 400);
+
+    /* 並び順 (index.php の SORT_OPTIONS と対応)。
+       投稿日時は説明文の先頭にある配布元の公開日を数値キー (YYYYMMDD) にする。
+       Amacha は「2017.02」の年月、DOVA は「2009-03-01」の年月日で、
+       日の位置が数字でない前者は CAST が 0 になり月までの比較になる。
+       日付や再生時間を持たない素材は、どの並び順でも末尾に回す */
+    $dateKey = 'CAST(substr(description,1,4) AS INTEGER) * 10000 +
+                CAST(substr(description,6,2) AS INTEGER) * 100 +
+                CAST(substr(description,9,2) AS INTEGER)';
+    $hasDate = "description GLOB '[0-9][0-9][0-9][0-9][-./][0-9][0-9]*'";
+    $ORDERS  = [
+        'default'   => 'id DESC',
+        'date-new'  => "({$hasDate}) DESC, ({$dateKey}) DESC, title COLLATE NOCASE",
+        'date-old'  => "({$hasDate}) DESC, ({$dateKey}) ASC, title COLLATE NOCASE",
+        'dur-long'  => '(duration > 0) DESC, duration DESC, title COLLATE NOCASE',
+        'dur-short' => '(duration > 0) DESC, duration ASC, title COLLATE NOCASE',
+    ];
+    $order = $ORDERS[$_GET['sort'] ?? ''] ?? $ORDERS['default'];
+
     $db     = assets_db();
     $where  = 'kind = :k';
     $params = [':k' => $kind];
@@ -96,8 +127,18 @@ case 'local': {
         $where .= ' AND (title LIKE :q OR tags LIKE :q OR author LIKE :q)';
         $params[':q'] = '%' . $q . '%';
     }
-    $stmt = $db->prepare("SELECT * FROM assets WHERE {$where} ORDER BY id DESC LIMIT 50");
+
+    /* 総件数 (UI の「n 件」表示と、追加読み込みの終了判定に使う) */
+    $cnt = $db->prepare("SELECT COUNT(*) FROM assets WHERE {$where}");
+    $cnt->execute($params);
+    $total = (int)$cnt->fetchColumn();
+
+    $stmt = $db->prepare("SELECT * FROM assets WHERE {$where} ORDER BY {$order} LIMIT {$limit} OFFSET {$offset}");
     $stmt->execute($params);
+    /* hasMore は返却件数ではなく DB 上の位置で判定する
+       (サムネイルも本体も無い行は下で除かれ、返却件数が limit より減りうるため) */
+    $meta = ['total'  => $total, 'offset' => $offset, 'limit' => $limit,
+             'hasMore' => $offset + $limit < $total];
     $type  = $kind === 'image' ? 'image' : ($kind === 'video' ? 'video' : 'audio');
     $items = [];
     foreach ($stmt as $row) {
@@ -243,5 +284,5 @@ default:
     fail('unknown_provider', 400);
 }
 
-echo json_encode(['items' => array_values(array_filter($items, fn($i) => $i['thumb'] !== '' || $i['preview'] !== ''))],
+echo json_encode(['items' => array_values(array_filter($items, fn($i) => $i['thumb'] !== '' || $i['preview'] !== ''))] + $meta,
                  JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
