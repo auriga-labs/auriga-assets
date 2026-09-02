@@ -102,7 +102,8 @@ case 'local': {
        投稿日時は説明文の先頭にある配布元の公開日を数値キー (YYYYMMDD) にする。
        Amacha は「2017.02」の年月、DOVA は「2009-03-01」の年月日で、
        日の位置が数字でない前者は CAST が 0 になり月までの比較になる。
-       日付や再生時間を持たない素材は、どの並び順でも末尾に回す */
+       人気順は配布元のダウンロード数 (download_count) の降順。
+       日付・再生時間・ダウンロード数を持たない素材は、どの並び順でも末尾に回す */
     $dateKey = 'CAST(substr(description,1,4) AS INTEGER) * 10000 +
                 CAST(substr(description,6,2) AS INTEGER) * 100 +
                 CAST(substr(description,9,2) AS INTEGER)';
@@ -113,6 +114,7 @@ case 'local': {
         'date-old'  => "({$hasDate}) DESC, ({$dateKey}) ASC, title COLLATE NOCASE",
         'dur-long'  => '(duration > 0) DESC, duration DESC, title COLLATE NOCASE',
         'dur-short' => '(duration > 0) DESC, duration ASC, title COLLATE NOCASE',
+        'popular'   => '(download_count > 0) DESC, download_count DESC, title COLLATE NOCASE',
     ];
     $order = $ORDERS[$_GET['sort'] ?? ''] ?? $ORDERS['default'];
 
@@ -158,6 +160,7 @@ case 'local': {
             'ncId'        => $row['nc_id'] ?? '',
             'commonsUrl'  => $row['commons_url'] ?? '',
             'downloadUrl' => $row['download_url'] ?? '',
+            'downloadCount' => (int)($row['download_count'] ?? 0),
         ];
     }
     break;

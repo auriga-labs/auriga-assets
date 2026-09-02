@@ -542,7 +542,7 @@ for (const tab of Object.keys(TABS)) {
 /* ローカル DB から一度に取得する件数 (スクロールでこの単位ずつ追加読み込みする) */
 const PAGE_SIZE = 50;
 
-/* 並び順の選択肢 (画像タブには出さない。投稿日時・再生時間で並び替える)
+/* 並び順の選択肢 (画像タブには出さない。投稿日時・再生時間・ダウンロード数で並び替える)
    デフォルトは投稿日時の降順 (年月が同じなら名前順) */
 const SORT_OPTIONS = [
   ['default',   '標準 (取得順)'],
@@ -550,6 +550,7 @@ const SORT_OPTIONS = [
   ['date-old',  '投稿日時が古い順'],
   ['dur-long',  '再生時間が長い順'],
   ['dur-short', '再生時間が短い順'],
+  ['popular',   '人気順 (ダウンロード数)'],
 ];
 
 /* ===== パネル生成 (全タブ共通テンプレート) ===== */
@@ -901,7 +902,9 @@ async function loadNextPage(tab) {
    (DB の登録日時は一括インポートで全件同じため使わない)。
    書式は配布元で異なり、Amacha は「2017.02」の年月、DOVA は「2009-03-01」の
    年月日なので、どちらも受け付けて YYYYMMDD 相当の数値に揃える (日が無ければ 0)。
-   日付や再生時間が無い素材は、どの並び順でも末尾に回す */
+   人気順は配布元のダウンロード数 (downloadCount) の降順で、オンライン検索の結果は
+   この値を持たない。日付・再生時間・ダウンロード数が無い素材は、
+   どの並び順でも末尾に回す */
 function itemDate(it) {
   const m = /^(\d{4})[.\-\/](\d{1,2})(?:[.\-\/](\d{1,2}))?/.exec(it.description ?? '');
   return m ? +m[1] * 10000 + +m[2] * 100 + (+m[3] || 0) : null;
@@ -912,6 +915,7 @@ const SORT_KEYS = {
   'date-old':  [itemDate, 1],
   'dur-long':  [it => it.duration > 0 ? it.duration : null, -1],
   'dur-short': [it => it.duration > 0 ? it.duration : null, 1],
+  'popular':   [it => it.downloadCount > 0 ? it.downloadCount : null, -1],
 };
 
 function sortItems(tab, items) {

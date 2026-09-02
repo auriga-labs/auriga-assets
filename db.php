@@ -36,6 +36,7 @@ function assets_db(): PDO
             nc_id        TEXT    NOT NULL DEFAULT "", -- ニコニコモンズ親作品ID (例: nc419769)
             commons_url  TEXT    NOT NULL DEFAULT "", -- ニコニコモンズ URL (https://commons.nicovideo.jp/material/nc*)
             download_url TEXT    NOT NULL DEFAULT "", -- 配布元ダウンロードページ (例: https://dova-s.jp/se/detail/1501/download)
+            download_count INTEGER NOT NULL DEFAULT 0, -- 配布元のダウンロード数 (人気順の並び替えに使う。不明は 0)
             created_at INTEGER NOT NULL
         )');
 
@@ -48,6 +49,7 @@ function assets_db(): PDO
         'nc_id'        => 'TEXT NOT NULL DEFAULT ""',
         'commons_url'  => 'TEXT NOT NULL DEFAULT ""',
         'download_url' => 'TEXT NOT NULL DEFAULT ""',
+        'download_count' => 'INTEGER NOT NULL DEFAULT 0',
     ];
     foreach ($add as $name => $def) {
         if (!in_array($name, $cols, true)) {
